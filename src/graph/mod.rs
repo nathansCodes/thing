@@ -1,10 +1,11 @@
 pub mod connections;
 mod data;
 
+pub use crate::graph::connections::{Attachment, RelativeAttachment};
 pub use data::GraphData;
 
 use iced::{
-    Color, Element, Event, Length, Point, Rectangle, Size, Transformation, Vector,
+    Border, Color, Element, Event, Length, Padding, Point, Rectangle, Size, Transformation, Vector,
     advanced::{
         Layout, Widget,
         graphics::{core::event::Status, geometry::Frame},
@@ -20,8 +21,6 @@ use iced::{
     },
 };
 
-use crate::graph::connections::{Attachment, RelativeAttachment};
-
 #[allow(clippy::type_complexity)]
 pub struct Graph<'a, Message, Theme, Renderer, Data, Attachment = RelativeAttachment>
 where
@@ -34,7 +33,7 @@ where
     data: &'a GraphData<Data, Attachment>,
     content: Vec<Element<'a, Message, Theme, Renderer>>,
     on_node_dragged: Option<Box<dyn Fn(NodeDraggedEvent) -> Message + 'a>>,
-    node_attachments: Vec<Attachment>,
+    get_attachment: Box<dyn Fn(Vector) -> Option<Attachment> + 'a>,
     on_connect: Option<Box<dyn Fn(OnConnectEvent<Attachment>) -> Message + 'a>>,
 }
 
@@ -61,7 +60,7 @@ where
             data,
             content,
             on_node_dragged: None,
-            node_attachments: Vec::new(),
+            get_attachment: Box::new(|_| None),
             on_connect: None,
         }
     }
@@ -74,8 +73,28 @@ where
         self
     }
 
-    pub fn node_attachments(mut self, attachments: &[Attachment]) -> Self {
-        self.node_attachments = Vec::from(attachments);
+    pub fn attachment_under_cursor<F>(mut self, cursor_over_attachment: F) -> Self
+    where
+        F: Fn(Vector) -> Option<Attachment> + 'a,
+    {
+        self.get_attachment = Box::new(cursor_over_attachment);
+        self
+    }
+
+    pub fn node_attachments(mut self, attachments: &'a [Attachment]) -> Self {
+        self.get_attachment = Box::new(|relative_cursor_pos| {
+            attachments
+                .iter()
+                .find(|att| {
+                    let mut diff = relative_cursor_pos - att.connection_point();
+
+                    diff.x = diff.x.abs();
+                    diff.y = diff.y.abs();
+
+                    diff.x < 0.15 && diff.y < 0.15
+                })
+                .cloned()
+        });
         self
     }
 
@@ -236,8 +255,9 @@ where
                                 + state.position
                                 + (a_size * attachment.connection_point()).into();
 
-                            let to = state.cursor_pos
-                                - Vector::new(bounds_position.x, bounds_position.y);
+                            let to = (state.cursor_pos
+                                - Vector::new(bounds_position.x, bounds_position.y))
+                                * Transformation::scale(1.0 / state.zoom);
 
                             frame.stroke(
                                 &Path::line(from, to),
@@ -289,22 +309,32 @@ where
                     });
                 },
             );
+        });
 
-            for (node, tree, node_layout, bounds) in self
-                .content
-                .iter()
-                .zip(tree.children.iter())
-                .zip(layout.children())
-                .filter_map(|((node, tree), node_layout)| {
-                    (node_layout.bounds()
-                        * Transformation::translate(state.position.x, state.position.y))
-                    .intersection(&layout.bounds())
-                    .map(|bounds| (node, tree, node_layout, bounds))
-                })
-            {
-                renderer.with_layer(bounds, |renderer| {
-                    renderer.with_transformation(Transformation::scale(state.zoom), |renderer| {
-                        renderer.with_translation(state.position, |renderer| {
+        for (node, tree, node_layout, bounds) in self
+            .content
+            .iter()
+            .zip(tree.children.iter())
+            .zip(layout.children())
+            .zip(self.data.nodes.iter())
+            .filter_map(|(((node, tree), node_layout), data)| {
+                transform_node_bounds(
+                    node_layout.bounds(),
+                    state.zoom,
+                    state.position,
+                    data.position,
+                )
+                .intersection(&layout.bounds())
+                .map(|bounds| (node, tree, node_layout, bounds))
+            })
+        {
+            renderer.with_layer(bounds, |renderer| {
+                renderer.with_transformation(Transformation::scale(state.zoom), |renderer| {
+                    let node_pos = Vector::new(layout.position().x, layout.position().y);
+                    renderer.with_translation(
+                        state.position - node_pos
+                            + node_pos * Transformation::scale(1.0 / state.zoom),
+                        |renderer| {
                             node.as_widget().draw(
                                 tree,
                                 renderer,
@@ -312,13 +342,13 @@ where
                                 style,
                                 node_layout,
                                 cursor,
-                                viewport,
+                                &Rectangle::with_size(Size::INFINITY),
                             );
-                        });
-                    });
+                        },
+                    );
                 });
-            }
-        });
+            });
+        }
 
         if !state.debug {
             return;
@@ -403,33 +433,38 @@ where
         let state = tree.state.downcast_mut::<GraphState<Attachment>>();
 
         let get_hovered_node = || {
-            layout.children().enumerate().find_map(|(i, child)| {
-                match cursor.position().map(|cursor_pos| {
-                    let hovered = child.bounds().contains(cursor_pos - state.position);
+            layout
+                .children()
+                .zip(self.data.nodes.iter())
+                .enumerate()
+                .find_map(|(i, (child, data))| {
+                    match cursor.position().map(|cursor_pos| {
+                        let child_bounds = transform_node_bounds(
+                            child.bounds(),
+                            state.zoom,
+                            state.position,
+                            data.position,
+                        );
 
-                    let hovered_attachment = self.node_attachments.iter().find(|att| {
-                        let mut diff = child.position()
-                            + (child.bounds().size() * att.connection_point()
-                                + state.position.into())
-                            .into()
-                            - cursor_pos;
+                        let hovered = child_bounds.contains(cursor_pos);
 
-                        diff.x = diff.x.abs();
-                        diff.y = diff.y.abs();
+                        let mut relative_cursor_pos = cursor_pos - child_bounds.position();
 
-                        diff.x < 15.0 && diff.y < 15.0
-                    });
+                        relative_cursor_pos.x /= child_bounds.size().width;
+                        relative_cursor_pos.y /= child_bounds.size().height;
 
-                    if let Some(hovered_attachment) = hovered_attachment {
-                        return Some((i, Some(hovered_attachment)));
+                        let hovered_attachment = (self.get_attachment)(relative_cursor_pos);
+
+                        if let Some(hovered_attachment) = hovered_attachment {
+                            return Some((i, Some(hovered_attachment)));
+                        }
+
+                        hovered.then_some((i, None))
+                    }) {
+                        Some(Some(node)) => Some((node.0, node.1)),
+                        _ => None,
                     }
-
-                    hovered.then_some((i, None))
-                }) {
-                    Some(Some(node)) => Some((node.0, node.1.cloned())),
-                    _ => None,
-                }
-            })
+                })
         };
 
         match event {
@@ -472,6 +507,7 @@ where
 
                         state.position.x = new_position.x;
                         state.position.y = new_position.y;
+                        shell.invalidate_layout();
                     }
                     DragState::None(hovered_node) => match hovered_node {
                         Some((id, _)) => {
@@ -631,4 +667,25 @@ where
     pub a_attachment: Attachment,
     pub b: usize,
     pub b_attachment: Attachment,
+}
+
+fn transform_node_bounds(
+    bounds: Rectangle,
+    zoom: f32,
+    position: Vector,
+    node_position: Point,
+) -> Rectangle {
+    let horizontal_padding = bounds.width * zoom - bounds.width;
+    let vertical_padding = bounds.height * zoom - bounds.height;
+
+    (bounds
+        * Transformation::translate(position.x * zoom, position.y * zoom)
+        * Transformation::translate(-node_position.x, -node_position.y)
+        * Transformation::translate(node_position.x * zoom, node_position.y * zoom))
+    .expand(Padding {
+        top: 0.0,
+        right: horizontal_padding,
+        bottom: vertical_padding,
+        left: 0.0,
+    })
 }
