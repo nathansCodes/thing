@@ -3,20 +3,19 @@ mod file_picker;
 mod graph;
 mod style;
 
-use crate::graph::{OnConnectEvent, connections::Attachment};
-use iced::{
-    Alignment, Border, Font, Padding, Point, Vector,
-    font::Weight,
-    widget::{canvas::Path, image, pane_grid, pick_list},
-};
-use std::{cmp::max, path::PathBuf};
+use crate::graph::{Attachment, OnConnectEvent};
 
 use iced::{
-    Element,
+    Alignment, Border, Element, Font,
     Length::Fill,
-    Task, Theme,
-    widget::{column, container, pane_grid::Configuration, row, text},
+    Padding, Point, Task, Theme, Vector,
+    font::Weight,
+    widget::{
+        canvas::Path, column, container, image, pane_grid, pane_grid::Configuration, pick_list,
+        row, text,
+    },
 };
+use std::path::PathBuf;
 
 use crate::{
     assets::{AssetType, AssetsMessage, AssetsPane},
@@ -437,7 +436,7 @@ fn view_image(img: &Image) -> Element<'_, Message> {
     .style(|theme: &Theme| {
         let palette = theme.extended_palette();
         container::Style::default()
-            .background(palette.background.base.color.scale_alpha(0.5))
+            .background(palette.background.base.color)
             .border(
                 Border::default()
                     .rounded(5.0)
