@@ -20,6 +20,7 @@ use iced::{
         container, text,
     },
 };
+use lyon_algorithms::hit_test::hit_test_path;
 
 #[allow(clippy::type_complexity)]
 pub struct Graph<'a, Message, Theme, Renderer, Data, Attachment = RelativeAttachment>
@@ -35,6 +36,7 @@ where
     on_node_dragged: Option<Box<dyn Fn(NodeDraggedEvent) -> Message + 'a>>,
     get_attachment: Box<dyn Fn(Vector) -> Option<Attachment> + 'a>,
     on_connect: Option<Box<dyn Fn(OnConnectEvent<Attachment>) -> Message + 'a>>,
+    on_disconnect: Option<Box<dyn Fn(usize) -> Message + 'a>>,
 }
 
 impl<'a, Message, Theme, Renderer, Data, Attachment>
@@ -62,6 +64,7 @@ where
             on_node_dragged: None,
             get_attachment: Box::new(|_| None),
             on_connect: None,
+            on_disconnect: None,
         }
     }
 
@@ -105,6 +108,14 @@ where
         self.on_connect = Some(Box::new(callback));
         self
     }
+
+    pub fn on_disconnect<F>(mut self, callback: F) -> Self
+    where
+        F: 'a + Fn(usize) -> Message,
+    {
+        self.on_disconnect = Some(Box::new(callback));
+        self
+    }
 }
 
 pub struct GraphState<Attachment = RelativeAttachment>
@@ -144,7 +155,7 @@ where
     Background,
     Node(usize),
     Attachment(usize, Attachment),
-    // Connection(usize),
+    Connection(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -208,7 +219,8 @@ where
                 Vector::new(bounds_position.x, bounds_position.y),
                 |renderer| {
                     renderer.with_transformation(Transformation::scale(state.zoom), |renderer| {
-                        let mut frame = Frame::new(renderer, layout.bounds().size());
+                        let mut frame =
+                            Frame::new(renderer, layout.bounds().size() * (1.0 / state.zoom));
 
                         // draw connections
                         for connection in &self.data.connections {
@@ -243,7 +255,7 @@ where
                                 &Attachment::path(a_attachment, from, b_attachment, to),
                                 Stroke::default()
                                     .with_color(style.text_color)
-                                    .with_width(5.0)
+                                    .with_width(5.0 / state.zoom)
                                     .with_line_join(LineJoin::Bevel)
                                     .with_line_cap(LineCap::Round),
                             );
@@ -274,7 +286,7 @@ where
                                 &Path::line(from, to),
                                 Stroke::default()
                                     .with_color(style.text_color)
-                                    .with_width(5.0)
+                                    .with_width(5.0 / state.zoom)
                                     .with_line_cap(LineCap::Round),
                             );
                         }
@@ -436,7 +448,7 @@ where
         event: iced::Event,
         layout: Layout<'_>,
         cursor: iced::advanced::mouse::Cursor,
-        _renderer: &Renderer,
+        renderer: &Renderer,
         _clipboard: &mut dyn iced::advanced::Clipboard,
         shell: &mut iced::advanced::Shell<'_, Message>,
         _viewport: &Rectangle,
@@ -478,7 +490,60 @@ where
                     }
                     None => None,
                 })
-                .unwrap_or(Payload::Background)
+                .unwrap_or_else(|| {
+                    if let Some(connection) = self.data.connections.first()
+                        && let Some(cursor_pos) = cursor.position()
+                    {
+                        let a = self.data.get(connection.a.0).unwrap();
+                        let b = self.data.get(connection.b.0).unwrap();
+
+                        let a_size = layout
+                            .children()
+                            .nth(connection.a.0)
+                            .expect("Invalid connection")
+                            .bounds()
+                            .size();
+
+                        let b_size = layout
+                            .children()
+                            .nth(connection.b.0)
+                            .expect("Invalid connection")
+                            .bounds()
+                            .size();
+
+                        let a_attachment = connection.a.1.clone();
+                        let b_attachment = connection.b.1.clone();
+
+                        let from = a.position
+                            + state.position
+                            + (a_size * a_attachment.connection_point()).into();
+                        let to = b.position
+                            + state.position
+                            + (b_size * b_attachment.connection_point()).into();
+
+                        let path = Attachment::path(
+                            connection.a.1.clone(),
+                            from,
+                            connection.b.1.clone(),
+                            to,
+                        );
+
+                        let hit = hit_test_path(
+                            &lyon_algorithms::geom::euclid::Point2D::new(
+                                cursor_pos.x - layout.position().x - state.position.x,
+                                cursor_pos.y - layout.position().y - state.position.y,
+                            ),
+                            path.raw().iter(),
+                            lyon_algorithms::path::FillRule::EvenOdd,
+                            15.0,
+                        );
+
+                        if hit {
+                            return Payload::Connection(0);
+                        }
+                    }
+                    Payload::Background
+                })
         };
 
         match event {
@@ -525,6 +590,7 @@ where
                             }
                         }
                         Payload::Attachment(_, _) => {}
+                        Payload::Connection(_) => {}
                     },
                     CursorState::Hovering(payload) => match payload {
                         Payload::Background => {
@@ -536,6 +602,9 @@ where
                         Payload::Node(id) | Payload::Attachment(id, _) => {
                             state.drag_origin = self.data.nodes[*id].position;
                             state.drag_start_point = cursor_pos;
+                            state.cursor_state = CursorState::Hovering(get_hovered_item());
+                        }
+                        Payload::Connection(_) => {
                             state.cursor_state = CursorState::Hovering(get_hovered_item());
                         }
                     },
@@ -568,6 +637,54 @@ where
                 state.cursor_state = match get_hovered_item() {
                     Payload::Attachment(id, att) => {
                         CursorState::Dragging(Payload::Attachment(id, att))
+                    }
+                    Payload::Connection(connection) => {
+                        if let Some(on_disconnect) = &self.on_disconnect {
+                            shell.publish(on_disconnect(connection));
+                        }
+                        let connection = self
+                            .data
+                            .connections
+                            .get(connection)
+                            .expect("Invalid connection");
+
+                        let a = self.data.get(connection.a.0).unwrap();
+                        let b = self.data.get(connection.b.0).unwrap();
+
+                        let a_size = layout
+                            .children()
+                            .nth(connection.a.0)
+                            .expect("Invalid connection")
+                            .bounds()
+                            .size();
+
+                        let b_size = layout
+                            .children()
+                            .nth(connection.b.0)
+                            .expect("Invalid connection")
+                            .bounds()
+                            .size();
+
+                        let a_attachment = connection.a.1.clone();
+                        let b_attachment = connection.b.1.clone();
+
+                        let a_att_pos = a.position
+                            + state.position
+                            + (a_size * a_attachment.connection_point()).into();
+                        let b_att_pos = b.position
+                            + state.position
+                            + (b_size * b_attachment.connection_point()).into();
+
+                        let delta_to_a = a_att_pos.distance(cursor_pos);
+                        let delta_to_b = b_att_pos.distance(cursor_pos);
+
+                        let new_payload = if delta_to_a < delta_to_b {
+                            Payload::Attachment(connection.a.0, a_attachment)
+                        } else {
+                            Payload::Attachment(connection.b.0, b_attachment)
+                        };
+
+                        CursorState::Dragging(new_payload)
                     }
                     other if state.shift_pressed => CursorState::Dragging(other),
                     _ => state.cursor_state.clone(),
