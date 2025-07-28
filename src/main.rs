@@ -112,7 +112,7 @@ impl Attachment for Family {
 
             let a_stub = a_point + a_direction * 25.0;
             let b_stub = b_point + b_direction * 25.0;
-            // TODO:
+
             match (a, b) {
                 // if they're the same
                 (a, b) if a == b => {
@@ -425,7 +425,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
 fn view_image(img: &Image) -> Element<'_, Message> {
     container(
         column![
-            image(img.path.clone()).width(50.0).height(50.0),
+            image(img.path.clone())
+                .width(Fill)
+                .height(Fill)
+                .filter_method(image::FilterMethod::Nearest),
             text(img.path.file_name().unwrap().to_str().unwrap().to_owned())
         ]
         .spacing(5.0),

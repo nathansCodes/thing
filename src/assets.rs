@@ -78,7 +78,10 @@ pub fn view(state: &AssetsPane) -> Element<AssetsMessage> {
             row(state.files.iter().map(|path| {
                 let img = mouse_area(container(
                     column![
-                        image(path).height(100.0).width(100.0),
+                        image(path)
+                            .height(100.0)
+                            .width(100.0)
+                            .filter_method(image::FilterMethod::Nearest),
                         text(
                             path.file_name()
                                 .map(|os_str| os_str.to_string_lossy())
