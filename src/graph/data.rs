@@ -131,6 +131,10 @@ impl<Data: std::fmt::Debug, Attachment: self::Attachment> GraphData<Data, Attach
     pub fn num_nodes(&self) -> usize {
         self.nodes.len()
     }
+
+    pub(crate) fn disconnect(&mut self, i: usize) {
+        self.connections.remove(i);
+    }
 }
 
 #[derive(Debug)]
