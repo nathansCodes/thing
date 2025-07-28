@@ -5,7 +5,7 @@ pub use crate::graph::connections::{Attachment, RelativeAttachment};
 pub use data::GraphData;
 
 use iced::{
-    Border, Color, Element, Event, Length, Padding, Point, Rectangle, Size, Transformation, Vector,
+    Color, Element, Event, Length, Padding, Point, Rectangle, Size, Transformation, Vector,
     advanced::{
         Layout, Widget,
         graphics::{core::event::Status, geometry::Frame},
@@ -112,7 +112,7 @@ where
     Attachment: connections::Attachment,
 {
     position: Vector,
-    drag_state: DragState<Attachment>,
+    cursor_state: CursorState<Attachment>,
     drag_origin: Point,
     drag_start_point: Point,
     zoom: f32,
@@ -125,7 +125,7 @@ impl<Attachment: connections::Attachment> Default for GraphState<Attachment> {
     fn default() -> Self {
         Self {
             position: Vector::ZERO,
-            drag_state: DragState::None(None),
+            cursor_state: CursorState::Hovering(Payload::Background),
             drag_origin: Point::ORIGIN,
             drag_start_point: Point::ORIGIN,
             zoom: 1.0,
@@ -137,14 +137,23 @@ impl<Attachment: connections::Attachment> Default for GraphState<Attachment> {
 }
 
 #[derive(Debug, Clone)]
-enum DragState<Attachment = RelativeAttachment>
+enum Payload<Attachment = RelativeAttachment>
 where
     Attachment: connections::Attachment + std::fmt::Debug,
 {
-    Node(usize),
     Background,
-    None(Option<(usize, Option<Attachment>)>),
+    Node(usize),
     Attachment(usize, Attachment),
+    // Connection(usize),
+}
+
+#[derive(Debug, Clone)]
+enum CursorState<Attachment = RelativeAttachment>
+where
+    Attachment: connections::Attachment + std::fmt::Debug,
+{
+    Hovering(Payload<Attachment>),
+    Dragging(Payload<Attachment>),
 }
 
 impl<'a, Message, Theme, Renderer, Data, Attachment> Widget<Message, Theme, Renderer>
@@ -241,7 +250,9 @@ where
                         }
 
                         // draw currently dragging attachment line
-                        if let DragState::Attachment(i, attachment) = &state.drag_state {
+                        if let CursorState::Dragging(Payload::Attachment(i, attachment)) =
+                            &state.cursor_state
+                        {
                             let a = self.data.get(*i).unwrap();
 
                             let a_size = layout
@@ -432,13 +443,13 @@ where
     ) -> Status {
         let state = tree.state.downcast_mut::<GraphState<Attachment>>();
 
-        let get_hovered_node = || {
+        let get_hovered_item = || {
             layout
                 .children()
                 .zip(self.data.nodes.iter())
                 .enumerate()
-                .find_map(|(i, (child, data))| {
-                    match cursor.position().map(|cursor_pos| {
+                .find_map(|(i, (child, data))| match cursor.position() {
+                    Some(cursor_pos) => {
                         let child_bounds = transform_node_bounds(
                             child.bounds(),
                             state.zoom,
@@ -456,15 +467,18 @@ where
                         let hovered_attachment = (self.get_attachment)(relative_cursor_pos);
 
                         if let Some(hovered_attachment) = hovered_attachment {
-                            return Some((i, Some(hovered_attachment)));
+                            return Some(Payload::Attachment(i, hovered_attachment));
                         }
 
-                        hovered.then_some((i, None))
-                    }) {
-                        Some(Some(node)) => Some((node.0, node.1)),
-                        _ => None,
+                        if hovered {
+                            Some(Payload::Node(i))
+                        } else {
+                            None
+                        }
                     }
+                    None => None,
                 })
+                .unwrap_or(Payload::Background)
         };
 
         match event {
@@ -477,58 +491,54 @@ where
             }) => {
                 state.cursor_pos = cursor_pos;
 
-                match &state.drag_state {
-                    DragState::Node(id) => {
-                        if let Some(on_node_dragged) = &self.on_node_dragged {
+                match &state.cursor_state {
+                    CursorState::Dragging(payload) => match payload {
+                        Payload::Background => {
                             let mut new_position = state.drag_origin
                                 + (cursor_pos - state.drag_start_point)
                                     * Transformation::scale(1.0 / state.zoom);
 
-                            // limiting the position to positive values cause the
+                            // limiting the position to negative values cause the
                             // renderer doesn't render elements with negative positions properly
-                            new_position.x = new_position.x.max(0.0);
-                            new_position.y = new_position.y.max(0.0);
+                            new_position.x = new_position.x.min(0.0);
+                            new_position.y = new_position.y.min(0.0);
 
-                            shell.publish(on_node_dragged(NodeDraggedEvent {
-                                id: *id,
-                                new_position,
-                            }));
+                            state.position.x = new_position.x;
+                            state.position.y = new_position.y;
+                            shell.invalidate_layout();
                         }
-                    }
-                    DragState::Background => {
-                        let mut new_position = state.drag_origin
-                            + (cursor_pos - state.drag_start_point)
-                                * Transformation::scale(1.0 / state.zoom);
+                        Payload::Node(id) => {
+                            if let Some(on_node_dragged) = &self.on_node_dragged {
+                                let mut new_position = state.drag_origin
+                                    + (cursor_pos - state.drag_start_point)
+                                        * Transformation::scale(1.0 / state.zoom);
 
-                        // same reason as before except that i limit it to negative values for some
-                        // reason
-                        new_position.x = new_position.x.min(0.0);
-                        new_position.y = new_position.y.min(0.0);
+                                // same reason as before except that i limit it to positive values for some
+                                // reason
+                                new_position.x = new_position.x.max(0.0);
+                                new_position.y = new_position.y.max(0.0);
 
-                        state.position.x = new_position.x;
-                        state.position.y = new_position.y;
-                        shell.invalidate_layout();
-                    }
-                    DragState::None(hovered_node) => match hovered_node {
-                        Some((id, _)) => {
-                            state.drag_origin = self.data.nodes[*id].position;
-                            state.drag_start_point = cursor_pos;
-                            state.drag_state = match get_hovered_node() {
-                                Some(node) => DragState::None(Some(node)),
-                                None => DragState::None(None),
-                            };
+                                shell.publish(on_node_dragged(NodeDraggedEvent {
+                                    id: *id,
+                                    new_position,
+                                }));
+                            }
                         }
-                        None => {
+                        Payload::Attachment(_, _) => {}
+                    },
+                    CursorState::Hovering(payload) => match payload {
+                        Payload::Background => {
                             state.drag_origin.x = state.position.x;
                             state.drag_origin.y = state.position.y;
                             state.drag_start_point = cursor_pos;
-                            state.drag_state = match get_hovered_node() {
-                                Some(node) => DragState::None(Some(node)),
-                                None => DragState::None(None),
-                            };
+                            state.cursor_state = CursorState::Hovering(get_hovered_item());
+                        }
+                        Payload::Node(id) | Payload::Attachment(id, _) => {
+                            state.drag_origin = self.data.nodes[*id].position;
+                            state.drag_start_point = cursor_pos;
+                            state.cursor_state = CursorState::Hovering(get_hovered_item());
                         }
                     },
-                    DragState::Attachment(..) => (),
                 }
 
                 Status::Captured
@@ -542,11 +552,7 @@ where
                     return Status::Ignored;
                 }
 
-                state.drag_state = match get_hovered_node() {
-                    Some((id, None)) => DragState::Node(id),
-                    Some((id, Some(attachment))) => DragState::Attachment(id, attachment),
-                    None => DragState::Background,
-                };
+                state.cursor_state = CursorState::Dragging(get_hovered_item());
 
                 Status::Captured
             }
@@ -559,22 +565,22 @@ where
                     return Status::Ignored;
                 }
 
-                state.drag_state = match get_hovered_node() {
-                    Some((id, None)) if state.shift_pressed => DragState::Node(id),
-                    Some((id, Some(attachment))) if state.shift_pressed => {
-                        DragState::Attachment(id, attachment)
+                state.cursor_state = match get_hovered_item() {
+                    Payload::Attachment(id, att) => {
+                        CursorState::Dragging(Payload::Attachment(id, att))
                     }
-                    None if state.shift_pressed => DragState::Background,
-                    _ => state.drag_state.clone(),
+                    other if state.shift_pressed => CursorState::Dragging(other),
+                    _ => state.cursor_state.clone(),
                 };
 
                 Status::Captured
             }
             Event::Mouse(mouse::Event::ButtonReleased(Button::Left | Button::Middle)) => {
-                let hovered = get_hovered_node();
+                let hovered = get_hovered_item();
 
-                if let Some((b, Some(b_attachment))) = hovered.clone()
-                    && let DragState::Attachment(a, a_attachment) = &state.drag_state
+                if let Payload::Attachment(b, b_attachment) = hovered.clone()
+                    && let CursorState::Dragging(Payload::Attachment(a, a_attachment)) =
+                        &state.cursor_state
                     && let Some(on_connect) = &self.on_connect
                 {
                     shell.publish(on_connect(OnConnectEvent::<Attachment> {
@@ -585,7 +591,7 @@ where
                     }));
                 }
 
-                state.drag_state = DragState::None(hovered);
+                state.cursor_state = CursorState::Hovering(hovered);
 
                 Status::Captured
             }
