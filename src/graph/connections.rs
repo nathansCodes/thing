@@ -1,4 +1,4 @@
-use iced::{Point, Vector, widget::canvas::Path};
+use iced::{Point, Size, Vector, widget::canvas::Path};
 
 #[derive(Debug)]
 pub(super) struct Connection<A: Attachment = RelativeAttachment> {
@@ -22,6 +22,10 @@ pub trait Attachment: std::fmt::Debug + Clone + Send {
 
     fn path(_a: Self, a_point: Point, _b: Self, b_point: Point) -> Path {
         Path::line(a_point, b_point)
+    }
+
+    fn resolve(&self, size: Size, position: Point) -> Point {
+        position + (size * self.connection_point()).into()
     }
 }
 
