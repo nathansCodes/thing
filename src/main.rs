@@ -249,6 +249,7 @@ pub enum Message {
     AddImageFailed(IOError),
     NodeDragged(NodeDraggedEvent),
     NodeConnect(OnConnectEvent<Family>),
+    NodeDisconnect(usize),
 }
 
 fn view(state: &State) -> Element<'_, Message> {
@@ -305,7 +306,8 @@ fn view(state: &State) -> Element<'_, Message> {
                         Family::SiblingLeft,
                         Family::SiblingRight,
                     ])
-                    .on_connect(Message::NodeConnect);
+                    .on_connect(Message::NodeConnect)
+                    .on_disconnect(Message::NodeDisconnect);
 
                 let graph = container(graph).style(|theme: &Theme| {
                     container::Style::default()
@@ -417,6 +419,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             b_attachment,
         }) => {
             let _ = state.images.connect(a, a_attachment, b, b_attachment);
+            Task::none()
+        }
+        Message::NodeDisconnect(i) => {
+            state.images.disconnect(i);
             Task::none()
         }
     }

@@ -5,4 +5,5 @@ edition = "2024"
 
 [dependencies]
 iced = { version = "0.13.1", features = ["debug", "image", "canvas", "advanced", "lazy"] }
+lyon_algorithms = "1.0.5"
 rfd = "0.15.4"

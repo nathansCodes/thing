@@ -1,5 +1,6 @@
 use iced::{Point, Vector, widget::canvas::Path};
 
+#[derive(Debug)]
 pub(super) struct Connection<A: Attachment = RelativeAttachment> {
     pub a: (usize, A),
     pub b: (usize, A),
