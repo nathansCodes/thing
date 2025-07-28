@@ -17,10 +17,16 @@ use iced::{
     mouse::{self, Button, Cursor, ScrollDelta},
     widget::{
         canvas::{LineCap, LineJoin, Path, Stroke},
-        container, text,
+        container,
     },
 };
-use lyon_algorithms::hit_test::hit_test_path;
+use lyon_algorithms::{
+    geom::{
+        Angle,
+        euclid::{Transform2D, Vector2D},
+    },
+    raycast::{Ray, raycast_path},
+};
 
 #[allow(clippy::type_complexity)]
 pub struct Graph<'a, Message, Theme, Renderer, Data, Attachment = RelativeAttachment>
@@ -42,11 +48,10 @@ where
 impl<'a, Message, Theme, Renderer, Data, Attachment>
     Graph<'a, Message, Theme, Renderer, Data, Attachment>
 where
-    Theme: container::Catalog + text::Catalog + 'a,
-    Renderer: iced::advanced::image::Renderer + iced::advanced::text::Renderer + 'a,
+    Theme: container::Catalog + 'a,
+    Renderer: iced::advanced::image::Renderer + iced::advanced::graphics::geometry::Renderer,
     Data: std::fmt::Debug,
-    Attachment: connections::Attachment,
-    Message: 'a,
+    Attachment: connections::Attachment + 'static,
 {
     pub fn new<F>(data: &'a GraphData<Data, Attachment>, view_node: F) -> Self
     where
@@ -115,6 +120,84 @@ where
     {
         self.on_disconnect = Some(Box::new(callback));
         self
+    }
+
+    fn find_hovered_connection(
+        &self,
+        state: &GraphState<Attachment>,
+        cursor_pos: Point,
+        layout: &Layout<'_>,
+    ) -> Option<usize> {
+        self.data
+            .connections
+            .iter()
+            .enumerate()
+            .find_map(|(i, connection)| {
+                let a = self.data.get(connection.a.0).unwrap();
+                let b = self.data.get(connection.b.0).unwrap();
+
+                let a_size = layout
+                    .children()
+                    .nth(connection.a.0)
+                    .expect("Invalid connection")
+                    .bounds()
+                    .size();
+
+                let b_size = layout
+                    .children()
+                    .nth(connection.b.0)
+                    .expect("Invalid connection")
+                    .bounds()
+                    .size();
+
+                let a_attachment = connection.a.1.clone();
+                let b_attachment = connection.b.1.clone();
+
+                let from = a_attachment.resolve(a_size, a.position + state.position);
+                let to = b_attachment.resolve(b_size, b.position + state.position);
+
+                let path =
+                    Attachment::path(connection.a.1.clone(), from, connection.b.1.clone(), to)
+                        .transform(&Transform2D::scale(state.zoom, state.zoom));
+
+                let path_rev = path.raw().reversed();
+
+                let mut path: Vec<_> = path.raw().iter().collect();
+
+                path.extend(path_rev.take(path.len() - 1));
+
+                let origin = lyon_algorithms::geom::euclid::Point2D::new(
+                    cursor_pos.x - layout.position().x - state.position.x,
+                    cursor_pos.y - layout.position().y - state.position.y,
+                );
+
+                let directions: Vec<_> = [
+                    Angle::zero(),
+                    Angle::pi() / 2.0,
+                    Angle::pi(),
+                    (Angle::pi() * 3.0) / 2.0,
+                ]
+                .iter()
+                .map(|angle| Vector2D::from_angle_and_length(*angle, 1.0))
+                .collect();
+
+                let hit = directions.iter().any(|direction| {
+                    raycast_path(
+                        &Ray {
+                            origin,
+                            direction: *direction,
+                        },
+                        path.clone(),
+                        15.0,
+                    )
+                    .is_some_and(|hit| hit.position.distance_to(origin) < 10.0)
+                });
+
+                if hit {
+                    return Some(i);
+                }
+                None
+            })
     }
 }
 
@@ -223,7 +306,7 @@ where
                             Frame::new(renderer, layout.bounds().size() * (1.0 / state.zoom));
 
                         // draw connections
-                        for connection in &self.data.connections {
+                        for (i, connection) in self.data.connections.iter().enumerate() {
                             let a = self.data.get(connection.a.0).unwrap();
                             let b = self.data.get(connection.b.0).unwrap();
 
@@ -251,14 +334,30 @@ where
                                 + state.position
                                 + (b_size * b_attachment.connection_point()).into();
 
+                            let path = Attachment::path(a_attachment, from, b_attachment, to);
+
                             frame.stroke(
-                                &Attachment::path(a_attachment, from, b_attachment, to),
+                                &path,
                                 Stroke::default()
                                     .with_color(style.text_color)
                                     .with_width(5.0 / state.zoom)
                                     .with_line_join(LineJoin::Bevel)
                                     .with_line_cap(LineCap::Round),
                             );
+
+                            if let CursorState::Hovering(Payload::Connection(j)) =
+                                &state.cursor_state
+                                && *j == i
+                            {
+                                frame.stroke(
+                                    &path,
+                                    Stroke::default()
+                                        .with_color(style.text_color.scale_alpha(0.3))
+                                        .with_width(10.0 / state.zoom)
+                                        .with_line_join(LineJoin::Bevel)
+                                        .with_line_cap(LineCap::Round),
+                                );
+                            }
                         }
 
                         // draw currently dragging attachment line
@@ -448,103 +547,54 @@ where
         event: iced::Event,
         layout: Layout<'_>,
         cursor: iced::advanced::mouse::Cursor,
-        renderer: &Renderer,
+        _renderer: &Renderer,
         _clipboard: &mut dyn iced::advanced::Clipboard,
         shell: &mut iced::advanced::Shell<'_, Message>,
         _viewport: &Rectangle,
     ) -> Status {
         let state = tree.state.downcast_mut::<GraphState<Attachment>>();
 
-        let get_hovered_item = || {
-            layout
-                .children()
-                .zip(self.data.nodes.iter())
-                .enumerate()
-                .find_map(|(i, (child, data))| match cursor.position() {
-                    Some(cursor_pos) => {
-                        let child_bounds = transform_node_bounds(
-                            child.bounds(),
-                            state.zoom,
-                            state.position,
-                            data.position,
-                        );
+        let new_payload = layout
+            .children()
+            .zip(self.data.nodes.iter())
+            .enumerate()
+            .find_map(|(i, (child, data))| match cursor.position() {
+                Some(cursor_pos) => {
+                    let child_bounds = transform_node_bounds(
+                        child.bounds(),
+                        state.zoom,
+                        state.position,
+                        data.position,
+                    );
 
-                        let hovered = child_bounds.contains(cursor_pos);
+                    let hovered = child_bounds.contains(cursor_pos);
 
-                        let mut relative_cursor_pos = cursor_pos - child_bounds.position();
+                    let mut relative_cursor_pos = cursor_pos - child_bounds.position();
 
-                        relative_cursor_pos.x /= child_bounds.size().width;
-                        relative_cursor_pos.y /= child_bounds.size().height;
+                    relative_cursor_pos.x /= child_bounds.size().width;
+                    relative_cursor_pos.y /= child_bounds.size().height;
 
-                        let hovered_attachment = (self.get_attachment)(relative_cursor_pos);
+                    let hovered_attachment = (self.get_attachment)(relative_cursor_pos);
 
-                        if let Some(hovered_attachment) = hovered_attachment {
-                            return Some(Payload::Attachment(i, hovered_attachment));
-                        }
-
-                        if hovered {
-                            Some(Payload::Node(i))
-                        } else {
-                            None
-                        }
+                    if let Some(hovered_attachment) = hovered_attachment {
+                        return Some(Payload::Attachment(i, hovered_attachment));
                     }
-                    None => None,
-                })
-                .unwrap_or_else(|| {
-                    if let Some(connection) = self.data.connections.first()
-                        && let Some(cursor_pos) = cursor.position()
-                    {
-                        let a = self.data.get(connection.a.0).unwrap();
-                        let b = self.data.get(connection.b.0).unwrap();
 
-                        let a_size = layout
-                            .children()
-                            .nth(connection.a.0)
-                            .expect("Invalid connection")
-                            .bounds()
-                            .size();
-
-                        let b_size = layout
-                            .children()
-                            .nth(connection.b.0)
-                            .expect("Invalid connection")
-                            .bounds()
-                            .size();
-
-                        let a_attachment = connection.a.1.clone();
-                        let b_attachment = connection.b.1.clone();
-
-                        let from = a.position
-                            + state.position
-                            + (a_size * a_attachment.connection_point()).into();
-                        let to = b.position
-                            + state.position
-                            + (b_size * b_attachment.connection_point()).into();
-
-                        let path = Attachment::path(
-                            connection.a.1.clone(),
-                            from,
-                            connection.b.1.clone(),
-                            to,
-                        );
-
-                        let hit = hit_test_path(
-                            &lyon_algorithms::geom::euclid::Point2D::new(
-                                cursor_pos.x - layout.position().x - state.position.x,
-                                cursor_pos.y - layout.position().y - state.position.y,
-                            ),
-                            path.raw().iter(),
-                            lyon_algorithms::path::FillRule::EvenOdd,
-                            15.0,
-                        );
-
-                        if hit {
-                            return Payload::Connection(0);
-                        }
+                    if hovered {
+                        Some(Payload::Node(i))
+                    } else {
+                        None
                     }
-                    Payload::Background
-                })
-        };
+                }
+                None => None,
+            })
+            .unwrap_or_else(|| {
+                cursor
+                    .position()
+                    .and_then(|cursor_pos| self.find_hovered_connection(state, cursor_pos, &layout))
+                    .map(Payload::Connection)
+                    .unwrap_or(Payload::Background)
+            });
 
         match event {
             Event::Touch(ev) => {
@@ -597,15 +647,15 @@ where
                             state.drag_origin.x = state.position.x;
                             state.drag_origin.y = state.position.y;
                             state.drag_start_point = cursor_pos;
-                            state.cursor_state = CursorState::Hovering(get_hovered_item());
+                            state.cursor_state = CursorState::Hovering(new_payload);
                         }
                         Payload::Node(id) | Payload::Attachment(id, _) => {
                             state.drag_origin = self.data.nodes[*id].position;
                             state.drag_start_point = cursor_pos;
-                            state.cursor_state = CursorState::Hovering(get_hovered_item());
+                            state.cursor_state = CursorState::Hovering(new_payload);
                         }
                         Payload::Connection(_) => {
-                            state.cursor_state = CursorState::Hovering(get_hovered_item());
+                            state.cursor_state = CursorState::Hovering(new_payload);
                         }
                     },
                 }
@@ -621,7 +671,7 @@ where
                     return Status::Ignored;
                 }
 
-                state.cursor_state = CursorState::Dragging(get_hovered_item());
+                state.cursor_state = CursorState::Dragging(new_payload);
 
                 Status::Captured
             }
@@ -634,7 +684,7 @@ where
                     return Status::Ignored;
                 }
 
-                state.cursor_state = match get_hovered_item() {
+                state.cursor_state = match new_payload {
                     Payload::Attachment(id, att) => {
                         CursorState::Dragging(Payload::Attachment(id, att))
                     }
@@ -668,20 +718,19 @@ where
                         let a_attachment = connection.a.1.clone();
                         let b_attachment = connection.b.1.clone();
 
-                        let a_att_pos = a.position
-                            + state.position
-                            + (a_size * a_attachment.connection_point()).into();
-                        let b_att_pos = b.position
-                            + state.position
-                            + (b_size * b_attachment.connection_point()).into();
+                        let a_att_pos = a_attachment.resolve(a_size, a.position + state.position);
+                        let b_att_pos = b_attachment.resolve(b_size, b.position + state.position);
+
+                        let cursor_pos =
+                            cursor_pos - Vector::new(layout.position().x, layout.position().y);
 
                         let delta_to_a = a_att_pos.distance(cursor_pos);
                         let delta_to_b = b_att_pos.distance(cursor_pos);
 
                         let new_payload = if delta_to_a < delta_to_b {
-                            Payload::Attachment(connection.a.0, a_attachment)
-                        } else {
                             Payload::Attachment(connection.b.0, b_attachment)
+                        } else {
+                            Payload::Attachment(connection.a.0, a_attachment)
                         };
 
                         CursorState::Dragging(new_payload)
@@ -693,9 +742,7 @@ where
                 Status::Captured
             }
             Event::Mouse(mouse::Event::ButtonReleased(Button::Left | Button::Middle)) => {
-                let hovered = get_hovered_item();
-
-                if let Payload::Attachment(b, b_attachment) = hovered.clone()
+                if let Payload::Attachment(b, b_attachment) = new_payload.clone()
                     && let CursorState::Dragging(Payload::Attachment(a, a_attachment)) =
                         &state.cursor_state
                     && let Some(on_connect) = &self.on_connect
@@ -708,7 +755,7 @@ where
                     }));
                 }
 
-                state.cursor_state = CursorState::Hovering(hovered);
+                state.cursor_state = CursorState::Hovering(new_payload);
 
                 Status::Captured
             }
