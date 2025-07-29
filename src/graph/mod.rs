@@ -914,7 +914,7 @@ where
                     ScrollDelta::Pixels { x, y } => (x, y * 0.05),
                 };
 
-                state.position.x += delta_x * 5.;
+                state.position.x = (state.position.x + delta_x * 5.0).min(0.0);
 
                 if state.zoom >= 0.3 && state.zoom <= 2.0 {
                     state.zoom += delta_y;
