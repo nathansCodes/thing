@@ -883,6 +883,13 @@ where
                             state.selection = selected;
                         }
                     }
+                    CursorState::Hovering(Payload::Node(id)) if state.shift_pressed => {
+                        if let Some(index) = state.selection.iter().position(|s| s == id) {
+                            state.selection.remove(index);
+                        } else {
+                            state.selection.push(*id);
+                        }
+                    }
                     CursorState::Hovering(Payload::Background) => {
                         state.selection.clear();
                     }
