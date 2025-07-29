@@ -16,7 +16,7 @@ use iced::{
     keyboard::{self, Key, Modifiers},
     mouse::{self, Button, Cursor, ScrollDelta},
     widget::{
-        canvas::{LineCap, LineJoin, Path, Stroke},
+        canvas::{Fill, LineCap, LineJoin, Path, Stroke, Style, fill::Rule},
         container,
     },
 };
@@ -156,15 +156,15 @@ where
                 let from = a_attachment.resolve(a_size, a.position + state.position);
                 let to = b_attachment.resolve(b_size, b.position + state.position);
 
-                let path =
+                let mut path: Vec<_> =
                     Attachment::path(connection.a.1.clone(), from, connection.b.1.clone(), to)
-                        .transform(&Transform2D::scale(state.zoom, state.zoom));
+                        .transform(&Transform2D::scale(state.zoom, state.zoom))
+                        .raw()
+                        .iter()
+                        .collect();
 
-                let path_rev = path.raw().reversed();
-
-                let mut path: Vec<_> = path.raw().iter().collect();
-
-                path.extend(path_rev.take(path.len() - 1));
+                // remove end event so that it doesn't connect the last point with the first one
+                path.pop();
 
                 let origin = lyon_algorithms::geom::euclid::Point2D::new(
                     cursor_pos.x - layout.position().x - state.position.x,
@@ -207,6 +207,7 @@ where
 {
     position: Vector,
     cursor_state: CursorState<Attachment>,
+    pressed_mb: Option<Button>,
     drag_origin: Point,
     drag_start_point: Point,
     zoom: f32,
@@ -220,6 +221,7 @@ impl<Attachment: connections::Attachment> Default for GraphState<Attachment> {
         Self {
             position: Vector::ZERO,
             cursor_state: CursorState::Hovering(Payload::Background),
+            pressed_mb: None,
             drag_origin: Point::ORIGIN,
             drag_start_point: Point::ORIGIN,
             zoom: 1.0,
@@ -647,12 +649,81 @@ where
                             state.drag_origin.x = state.position.x;
                             state.drag_origin.y = state.position.y;
                             state.drag_start_point = cursor_pos;
-                            state.cursor_state = CursorState::Hovering(new_payload);
+                            state.cursor_state = if state.pressed_mb == Some(Button::Middle) {
+                                CursorState::Dragging(new_payload)
+                            } else {
+                                CursorState::Hovering(new_payload)
+                            };
                         }
-                        Payload::Node(id) | Payload::Attachment(id, _) => {
+                        Payload::Node(id) => {
                             state.drag_origin = self.data.nodes[*id].position;
                             state.drag_start_point = cursor_pos;
-                            state.cursor_state = CursorState::Hovering(new_payload);
+                            state.cursor_state = if state.pressed_mb == Some(Button::Middle) {
+                                CursorState::Dragging(new_payload)
+                            } else {
+                                CursorState::Hovering(new_payload)
+                            };
+                        }
+                        Payload::Attachment(id, _) => {
+                            state.drag_origin = self.data.nodes[*id].position;
+                            state.drag_start_point = cursor_pos;
+                            state.cursor_state = if state.pressed_mb == Some(Button::Left) {
+                                CursorState::Dragging(new_payload)
+                            } else {
+                                CursorState::Hovering(new_payload)
+                            };
+                        }
+                        Payload::Connection(connection)
+                            if state.pressed_mb == Some(Button::Left) =>
+                        {
+                            if let Some(on_disconnect) = &self.on_disconnect {
+                                shell.publish(on_disconnect(*connection));
+                            }
+
+                            let connection = self
+                                .data
+                                .connections
+                                .get(*connection)
+                                .expect("Invalid connection");
+
+                            let a = self.data.get(connection.a.0).unwrap();
+                            let b = self.data.get(connection.b.0).unwrap();
+
+                            let a_size = layout
+                                .children()
+                                .nth(connection.a.0)
+                                .expect("Invalid connection")
+                                .bounds()
+                                .size();
+
+                            let b_size = layout
+                                .children()
+                                .nth(connection.b.0)
+                                .expect("Invalid connection")
+                                .bounds()
+                                .size();
+
+                            let a_attachment = connection.a.1.clone();
+                            let b_attachment = connection.b.1.clone();
+
+                            let a_att_pos =
+                                a_attachment.resolve(a_size, a.position + state.position);
+                            let b_att_pos =
+                                b_attachment.resolve(b_size, b.position + state.position);
+
+                            let cursor_pos =
+                                cursor_pos - Vector::new(layout.position().x, layout.position().y);
+
+                            let delta_to_a = a_att_pos.distance(cursor_pos);
+                            let delta_to_b = b_att_pos.distance(cursor_pos);
+
+                            let new_payload = if delta_to_a < delta_to_b {
+                                Payload::Attachment(connection.b.0, b_attachment)
+                            } else {
+                                Payload::Attachment(connection.a.0, a_attachment)
+                            };
+
+                            state.cursor_state = CursorState::Dragging(new_payload);
                         }
                         Payload::Connection(_) => {
                             state.cursor_state = CursorState::Hovering(new_payload);
@@ -662,7 +733,7 @@ where
 
                 Status::Captured
             }
-            Event::Mouse(mouse::Event::ButtonPressed(Button::Middle)) => {
+            Event::Mouse(mouse::Event::ButtonPressed(button)) => {
                 let Some(cursor_pos) = cursor.position() else {
                     return Status::Ignored;
                 };
@@ -671,77 +742,15 @@ where
                     return Status::Ignored;
                 }
 
-                state.cursor_state = CursorState::Dragging(new_payload);
+                state.pressed_mb = Some(button);
 
-                Status::Captured
-            }
-            Event::Mouse(mouse::Event::ButtonPressed(Button::Left)) => {
-                let Some(cursor_pos) = cursor.position() else {
-                    return Status::Ignored;
-                };
-
-                if !layout.bounds().contains(cursor_pos) {
-                    return Status::Ignored;
-                }
-
-                state.cursor_state = match new_payload {
-                    Payload::Attachment(id, att) => {
-                        CursorState::Dragging(Payload::Attachment(id, att))
-                    }
-                    Payload::Connection(connection) => {
-                        if let Some(on_disconnect) = &self.on_disconnect {
-                            shell.publish(on_disconnect(connection));
-                        }
-                        let connection = self
-                            .data
-                            .connections
-                            .get(connection)
-                            .expect("Invalid connection");
-
-                        let a = self.data.get(connection.a.0).unwrap();
-                        let b = self.data.get(connection.b.0).unwrap();
-
-                        let a_size = layout
-                            .children()
-                            .nth(connection.a.0)
-                            .expect("Invalid connection")
-                            .bounds()
-                            .size();
-
-                        let b_size = layout
-                            .children()
-                            .nth(connection.b.0)
-                            .expect("Invalid connection")
-                            .bounds()
-                            .size();
-
-                        let a_attachment = connection.a.1.clone();
-                        let b_attachment = connection.b.1.clone();
-
-                        let a_att_pos = a_attachment.resolve(a_size, a.position + state.position);
-                        let b_att_pos = b_attachment.resolve(b_size, b.position + state.position);
-
-                        let cursor_pos =
-                            cursor_pos - Vector::new(layout.position().x, layout.position().y);
-
-                        let delta_to_a = a_att_pos.distance(cursor_pos);
-                        let delta_to_b = b_att_pos.distance(cursor_pos);
-
-                        let new_payload = if delta_to_a < delta_to_b {
-                            Payload::Attachment(connection.b.0, b_attachment)
-                        } else {
-                            Payload::Attachment(connection.a.0, a_attachment)
-                        };
-
-                        CursorState::Dragging(new_payload)
-                    }
-                    other if state.shift_pressed => CursorState::Dragging(other),
-                    _ => state.cursor_state.clone(),
-                };
+                state.cursor_state = CursorState::Hovering(new_payload);
 
                 Status::Captured
             }
             Event::Mouse(mouse::Event::ButtonReleased(Button::Left | Button::Middle)) => {
+                state.pressed_mb = None;
+
                 if let Payload::Attachment(b, b_attachment) = new_payload.clone()
                     && let CursorState::Dragging(Payload::Attachment(a, a_attachment)) =
                         &state.cursor_state
