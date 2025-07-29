@@ -202,8 +202,8 @@ where
                 let a_attachment = connection.a.1.clone();
                 let b_attachment = connection.b.1.clone();
 
-                let from = a_attachment.resolve(a_size, a.position + state.position);
-                let to = b_attachment.resolve(b_size, b.position + state.position);
+                let from = a_attachment.resolve(a_size, a.position);
+                let to = b_attachment.resolve(b_size, b.position);
 
                 let mut path: Vec<_> =
                     Attachment::path(connection.a.1.clone(), from, connection.b.1.clone(), to)
