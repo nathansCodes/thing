@@ -63,9 +63,9 @@ impl Attachment for Family {
         }
     }
 
-    fn path(a: Self, a_point: Point, b: Self, other_point: Point) -> iced::widget::canvas::Path {
+    fn path(a: Self, a_point: Point, b: Self, b_point: Point) -> iced::widget::canvas::Path {
         let mut a_point = a_point;
-        let mut b_point = other_point;
+        let mut b_point = b_point;
 
         // swap if needed
         let (a, b) = match (a, b) {
@@ -160,20 +160,7 @@ impl Attachment for Family {
                 (Self::Parent, Self::Child) | (Self::SiblingRight, Self::SiblingLeft) => {
                     let halfway_vector = (b_vector - a_vector) * 0.5;
 
-                    // builder.bezier_curve_to(
-                    //     Point::new(
-                    //         a_point.x - halfway_vector.x * a_direction.x,
-                    //         a_point.y - halfway_vector.y * a_direction.y,
-                    //     ),
-                    //     Point::new(
-                    //         b_point.x - halfway_vector.x * b_direction.x,
-                    //         b_point.y - halfway_vector.y * b_direction.y,
-                    //     ),
-                    //     b_point,
-                    // );
                     builder.line_to(a_stub);
-
-                    // TODO: if a > b, then fix
 
                     if a_stub.x * a_direction.x.abs() < b_stub.x * b_direction.x.abs()
                         || a_stub.y * a_direction.y.abs() > b_stub.y * b_direction.y.abs()
