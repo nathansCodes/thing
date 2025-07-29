@@ -5,7 +5,8 @@ pub use crate::graph::connections::{Attachment, RelativeAttachment};
 pub use data::GraphData;
 
 use iced::{
-    Color, Element, Event, Length, Padding, Point, Rectangle, Size, Transformation, Vector,
+    Border, Color, Element, Event, Length, Padding, Point, Rectangle, Size, Theme, Transformation,
+    Vector,
     advanced::{
         Layout, Widget,
         graphics::{core::event::Status, geometry::Frame},
@@ -15,10 +16,7 @@ use iced::{
     },
     keyboard::{self, Key, Modifiers},
     mouse::{self, Button, Cursor, ScrollDelta},
-    widget::{
-        canvas::{Fill, LineCap, LineJoin, Path, Stroke, Style, fill::Rule},
-        container,
-    },
+    widget::canvas::{LineCap, LineJoin, Path, Stroke},
 };
 use lyon_algorithms::{
     geom::{
@@ -28,10 +26,63 @@ use lyon_algorithms::{
     raycast::{Ray, raycast_path},
 };
 
-#[allow(clippy::type_complexity)]
-pub struct Graph<'a, Message, Theme, Renderer, Data, Attachment = RelativeAttachment>
+pub struct GraphState<Attachment = RelativeAttachment>
 where
-    Theme: container::Catalog,
+    Attachment: connections::Attachment,
+{
+    position: Vector,
+    cursor_state: CursorState<Attachment>,
+    pressed_mb: Option<Button>,
+    drag_origin: Point,
+    drag_start_point: Point,
+    zoom: f32,
+    shift_pressed: bool,
+    cursor_pos: Point,
+    debug: bool,
+    selection: Vec<usize>,
+}
+
+impl<Attachment: connections::Attachment> Default for GraphState<Attachment> {
+    fn default() -> Self {
+        Self {
+            position: Vector::ZERO,
+            cursor_state: CursorState::Hovering(Payload::Background),
+            pressed_mb: None,
+            drag_origin: Point::ORIGIN,
+            drag_start_point: Point::ORIGIN,
+            zoom: 1.0,
+            shift_pressed: false,
+            cursor_pos: Point::ORIGIN,
+            debug: false,
+            selection: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum Payload<Attachment = RelativeAttachment>
+where
+    Attachment: connections::Attachment + std::fmt::Debug,
+{
+    Background,
+    Node(usize),
+    Attachment(usize, Attachment),
+    Connection(usize),
+    SelectionRect,
+}
+
+#[derive(Debug, Clone)]
+enum CursorState<Attachment = RelativeAttachment>
+where
+    Attachment: connections::Attachment + std::fmt::Debug,
+{
+    Hovering(Payload<Attachment>),
+    Dragging(Payload<Attachment>),
+}
+
+#[allow(clippy::type_complexity)]
+pub struct Graph<'a, Message, Renderer, Data, Attachment = RelativeAttachment>
+where
     Renderer: iced::advanced::image::Renderer,
     Data: std::fmt::Debug,
     Attachment: connections::Attachment,
@@ -45,10 +96,8 @@ where
     on_disconnect: Option<Box<dyn Fn(usize) -> Message + 'a>>,
 }
 
-impl<'a, Message, Theme, Renderer, Data, Attachment>
-    Graph<'a, Message, Theme, Renderer, Data, Attachment>
+impl<'a, Message, Renderer, Data, Attachment> Graph<'a, Message, Renderer, Data, Attachment>
 where
-    Theme: container::Catalog + 'a,
     Renderer: iced::advanced::image::Renderer + iced::advanced::graphics::geometry::Renderer,
     Data: std::fmt::Debug,
     Attachment: connections::Attachment + 'static,
@@ -196,66 +245,15 @@ where
                 if hit {
                     return Some(i);
                 }
+
                 None
             })
     }
 }
 
-pub struct GraphState<Attachment = RelativeAttachment>
+impl<'a, Message, Renderer, Data, Attachment> Widget<Message, Theme, Renderer>
+    for Graph<'a, Message, Renderer, Data, Attachment>
 where
-    Attachment: connections::Attachment,
-{
-    position: Vector,
-    cursor_state: CursorState<Attachment>,
-    pressed_mb: Option<Button>,
-    drag_origin: Point,
-    drag_start_point: Point,
-    zoom: f32,
-    shift_pressed: bool,
-    cursor_pos: Point,
-    debug: bool,
-}
-
-impl<Attachment: connections::Attachment> Default for GraphState<Attachment> {
-    fn default() -> Self {
-        Self {
-            position: Vector::ZERO,
-            cursor_state: CursorState::Hovering(Payload::Background),
-            pressed_mb: None,
-            drag_origin: Point::ORIGIN,
-            drag_start_point: Point::ORIGIN,
-            zoom: 1.0,
-            shift_pressed: false,
-            cursor_pos: Point::ORIGIN,
-            debug: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-enum Payload<Attachment = RelativeAttachment>
-where
-    Attachment: connections::Attachment + std::fmt::Debug,
-{
-    Background,
-    Node(usize),
-    Attachment(usize, Attachment),
-    Connection(usize),
-}
-
-#[derive(Debug, Clone)]
-enum CursorState<Attachment = RelativeAttachment>
-where
-    Attachment: connections::Attachment + std::fmt::Debug,
-{
-    Hovering(Payload<Attachment>),
-    Dragging(Payload<Attachment>),
-}
-
-impl<'a, Message, Theme, Renderer, Data, Attachment> Widget<Message, Theme, Renderer>
-    for Graph<'a, Message, Theme, Renderer, Data, Attachment>
-where
-    Theme: container::Catalog + 'a,
     Renderer: iced::advanced::image::Renderer + iced::advanced::graphics::geometry::Renderer,
     Data: std::fmt::Debug,
     Attachment: connections::Attachment + 'static,
@@ -296,6 +294,7 @@ where
         viewport: &Rectangle,
     ) {
         let state = tree.state.downcast_ref::<GraphState<Attachment>>();
+        let palette = theme.extended_palette();
 
         let bounds_position = layout.bounds().position();
 
@@ -435,13 +434,13 @@ where
             );
         });
 
-        for (node, tree, node_layout, bounds) in self
-            .content
+        self.content
             .iter()
+            .enumerate()
             .zip(tree.children.iter())
             .zip(layout.children())
             .zip(self.data.nodes.iter())
-            .filter_map(|(((node, tree), node_layout), data)| {
+            .filter_map(|((((i, element), tree), node_layout), data)| {
                 transform_node_bounds(
                     node_layout.bounds(),
                     state.zoom,
@@ -449,28 +448,72 @@ where
                     data.position,
                 )
                 .intersection(&layout.bounds())
-                .map(|bounds| (node, tree, node_layout, bounds))
+                .map(|bounds| (i, element, tree, node_layout, data, bounds))
             })
-        {
-            renderer.with_layer(bounds, |renderer| {
-                renderer.with_transformation(Transformation::scale(state.zoom), |renderer| {
-                    let node_pos = Vector::new(layout.position().x, layout.position().y);
-                    renderer.with_translation(
-                        state.position - node_pos
-                            + node_pos * Transformation::scale(1.0 / state.zoom),
-                        |renderer| {
-                            node.as_widget().draw(
-                                tree,
-                                renderer,
-                                theme,
-                                style,
-                                node_layout,
-                                cursor,
-                                &Rectangle::with_size(Size::INFINITY),
-                            );
-                        },
-                    );
+            .for_each(|(i, node, tree, node_layout, data, bounds)| {
+                renderer.with_layer(bounds, |renderer| {
+                    renderer.with_transformation(Transformation::scale(state.zoom), |renderer| {
+                        let node_pos = Vector::new(layout.position().x, layout.position().y);
+                        renderer.with_translation(
+                            state.position - node_pos
+                                + node_pos * Transformation::scale(1.0 / state.zoom),
+                            |renderer| {
+                                node.as_widget().draw(
+                                    tree,
+                                    renderer,
+                                    theme,
+                                    style,
+                                    node_layout,
+                                    cursor,
+                                    &Rectangle::with_size(Size::INFINITY),
+                                );
+                            },
+                        );
+                    });
+                    if state.selection.contains(&i) {
+                        renderer.fill_quad(
+                            Quad {
+                                bounds: transform_node_bounds(
+                                    node_layout.bounds(),
+                                    state.zoom,
+                                    state.position,
+                                    data.position,
+                                ),
+                                border: Border::default()
+                                    .color(palette.primary.base.color)
+                                    .width(3.0)
+                                    .rounded(5.0),
+                                ..Default::default()
+                            },
+                            Color::TRANSPARENT,
+                        );
+                    }
                 });
+            });
+
+        if let CursorState::Dragging(Payload::SelectionRect) = &state.cursor_state {
+            renderer.with_layer(layout.bounds(), |renderer| {
+                let mut top_left = state.drag_start_point;
+                let mut bottom_right = state.cursor_pos;
+
+                if bottom_right.x < top_left.x {
+                    std::mem::swap(&mut top_left.x, &mut bottom_right.x);
+                }
+                if bottom_right.y < top_left.y {
+                    std::mem::swap(&mut top_left.y, &mut bottom_right.y);
+                }
+
+                renderer.fill_quad(
+                    Quad {
+                        bounds: Rectangle::new(top_left, (bottom_right - top_left).into()),
+                        border: Border::default()
+                            .width(3.0)
+                            .rounded(10.0)
+                            .color(palette.primary.base.color),
+                        ..Default::default()
+                    },
+                    palette.primary.base.color.scale_alpha(0.1),
+                );
             });
         }
 
@@ -635,14 +678,54 @@ where
                                 new_position.x = new_position.x.max(0.0);
                                 new_position.y = new_position.y.max(0.0);
 
+                                // un-select other nodes if current one isn't part of the selection
+                                if !state.selection.contains(id) {
+                                    state.selection.clear();
+                                }
+
+                                // make sure no nodes get negative positions
+                                let mut correction = Vector::ZERO;
+
+                                let selections_positions: Vec<_> = state
+                                    .selection
+                                    .iter()
+                                    .filter_map(|selected: &usize| {
+                                        if selected == id {
+                                            return None;
+                                        }
+
+                                        let node = &self.data.nodes[*selected];
+
+                                        let new_position = node.position
+                                            + (new_position - self.data.nodes[*id].position);
+
+                                        if new_position.x < 0.0 {
+                                            correction.x = correction.x.max(-new_position.x);
+                                        }
+                                        if new_position.y < 0.0 {
+                                            correction.y = correction.y.max(-new_position.y);
+                                        }
+
+                                        Some((*selected, new_position))
+                                    })
+                                    .collect();
+
                                 shell.publish(on_node_dragged(NodeDraggedEvent {
                                     id: *id,
-                                    new_position,
+                                    new_position: new_position + correction,
                                 }));
+
+                                selections_positions.iter().for_each(|(id, new_position)| {
+                                    shell.publish(on_node_dragged(NodeDraggedEvent {
+                                        id: *id,
+                                        new_position: *new_position + correction,
+                                    }));
+                                });
                             }
                         }
                         Payload::Attachment(_, _) => {}
                         Payload::Connection(_) => {}
+                        Payload::SelectionRect => {}
                     },
                     CursorState::Hovering(payload) => match payload {
                         Payload::Background => {
@@ -651,6 +734,8 @@ where
                             state.drag_start_point = cursor_pos;
                             state.cursor_state = if state.pressed_mb == Some(Button::Middle) {
                                 CursorState::Dragging(new_payload)
+                            } else if state.pressed_mb == Some(Button::Left) {
+                                CursorState::Dragging(Payload::SelectionRect)
                             } else {
                                 CursorState::Hovering(new_payload)
                             };
@@ -728,6 +813,7 @@ where
                         Payload::Connection(_) => {
                             state.cursor_state = CursorState::Hovering(new_payload);
                         }
+                        Payload::SelectionRect => unreachable!(),
                     },
                 }
 
@@ -751,17 +837,56 @@ where
             Event::Mouse(mouse::Event::ButtonReleased(Button::Left | Button::Middle)) => {
                 state.pressed_mb = None;
 
-                if let Payload::Attachment(b, b_attachment) = new_payload.clone()
-                    && let CursorState::Dragging(Payload::Attachment(a, a_attachment)) =
-                        &state.cursor_state
-                    && let Some(on_connect) = &self.on_connect
-                {
-                    shell.publish(on_connect(OnConnectEvent::<Attachment> {
-                        a: *a,
-                        a_attachment: a_attachment.clone(),
-                        b,
-                        b_attachment,
-                    }));
+                match &state.cursor_state {
+                    CursorState::Dragging(Payload::Attachment(a, a_attachment)) => {
+                        if let Payload::Attachment(b, b_attachment) = new_payload.clone()
+                            && let Some(on_connect) = &self.on_connect
+                        {
+                            shell.publish(on_connect(OnConnectEvent::<Attachment> {
+                                a: *a,
+                                a_attachment: a_attachment.clone(),
+                                b,
+                                b_attachment,
+                            }));
+                        }
+                    }
+                    CursorState::Dragging(Payload::SelectionRect) => {
+                        let mut top_left = state.drag_start_point;
+                        let mut bottom_right = state.cursor_pos;
+
+                        if bottom_right.distance(Point::ORIGIN) < top_left.distance(Point::ORIGIN) {
+                            std::mem::swap(&mut top_left, &mut bottom_right);
+                        }
+
+                        let rect = Rectangle::new(top_left, (bottom_right - top_left).into());
+
+                        let mut selected: Vec<_> = layout
+                            .children()
+                            .zip(self.data.nodes.iter())
+                            .enumerate()
+                            .filter_map(|(i, (child, node))| {
+                                rect.intersects(&transform_node_bounds(
+                                    child.bounds(),
+                                    state.zoom,
+                                    state.position,
+                                    node.position,
+                                ))
+                                .then_some(i)
+                            })
+                            .collect();
+
+                        if state.shift_pressed {
+                            state.selection.append(&mut selected);
+                            state.selection.sort();
+                            state.selection.dedup();
+                        } else {
+                            state.selection = selected;
+                        }
+                    }
+                    CursorState::Hovering(Payload::Background) => {
+                        state.selection.clear();
+                    }
+                    _ => (),
                 }
 
                 state.cursor_state = CursorState::Hovering(new_payload);
@@ -813,12 +938,10 @@ where
     }
 }
 
-impl<'a, Message, Theme, Renderer, Data, Attachment>
-    From<Graph<'a, Message, Theme, Renderer, Data, Attachment>>
+impl<'a, Message, Renderer, Data, Attachment> From<Graph<'a, Message, Renderer, Data, Attachment>>
     for Element<'a, Message, Theme, Renderer>
 where
     Message: 'a,
-    Theme: container::Catalog + 'a,
     Renderer: renderer::Renderer
         + iced::advanced::image::Renderer
         + iced::advanced::graphics::geometry::Renderer
@@ -826,7 +949,7 @@ where
     Data: std::fmt::Debug,
     Attachment: connections::Attachment + 'static,
 {
-    fn from(value: Graph<'a, Message, Theme, Renderer, Data, Attachment>) -> Self {
+    fn from(value: Graph<'a, Message, Renderer, Data, Attachment>) -> Self {
         Self::new(value)
     }
 }
