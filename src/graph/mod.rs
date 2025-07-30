@@ -250,10 +250,11 @@ where
             })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn get_payload(
         &mut self,
         layout: &Layout<'_>,
-        tree_children: &mut Vec<Tree>,
+        tree_children: &mut [Tree],
         cursor: Cursor,
         state: &GraphState<Attachment>,
         event: Event,
@@ -329,7 +330,7 @@ where
             .unwrap_or_else(|| {
                 cursor
                     .position()
-                    .and_then(|cursor_pos| self.find_hovered_connection(state, cursor_pos, &layout))
+                    .and_then(|cursor_pos| self.find_hovered_connection(state, cursor_pos, layout))
                     .map(Payload::Connection)
                     .unwrap_or(Payload::Background)
             })
