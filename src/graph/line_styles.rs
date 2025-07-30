@@ -225,8 +225,12 @@ impl LineStyle for Bezier {
             let halfway_vector_length =
                 (halfway_vector.x.powi(2) + halfway_vector.y.powi(2)).sqrt();
 
+            let halfway_direction = -halfway_vector * (1.0 / halfway_vector_length);
+
             let a_direction = match a {
-                RelativeAttachment::Center => halfway_vector * (1.0 / halfway_vector_length),
+                RelativeAttachment::Center => {
+                    Vector::new(-halfway_direction.x, halfway_direction.y)
+                }
                 RelativeAttachment::Edge {
                     edge: Edge::Top, ..
                 } => Vector::new(0.0, 1.0),
@@ -242,7 +246,9 @@ impl LineStyle for Bezier {
             };
 
             let b_direction = match b {
-                RelativeAttachment::Center => -halfway_vector * (1.0 / halfway_vector_length),
+                RelativeAttachment::Center => {
+                    Vector::new(halfway_direction.x, -halfway_direction.y)
+                }
                 RelativeAttachment::Edge {
                     edge: Edge::Top, ..
                 } => Vector::new(0.0, 1.0),
