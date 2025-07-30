@@ -216,8 +216,8 @@ where
                 path.pop();
 
                 let origin = lyon_algorithms::geom::euclid::Point2D::new(
-                    cursor_pos.x - layout.position().x - state.position.x,
-                    cursor_pos.y - layout.position().y - state.position.y,
+                    cursor_pos.x - layout.position().x - state.position.x * state.zoom,
+                    cursor_pos.y - layout.position().y - state.position.y * state.zoom,
                 );
 
                 let directions: Vec<_> = [
