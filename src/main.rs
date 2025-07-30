@@ -11,8 +11,8 @@ use iced::{
     Padding, Point, Task, Theme, Vector,
     font::Weight,
     widget::{
-        canvas::Path, column, container, image, pane_grid, pane_grid::Configuration, pick_list,
-        row, text,
+        button, canvas::Path, column, container, image, opaque, pane_grid,
+        pane_grid::Configuration, pick_list, row, text,
     },
 };
 use std::path::PathBuf;
@@ -237,6 +237,7 @@ pub enum Message {
     NodeDragged(NodeDraggedEvent),
     NodeConnect(OnConnectEvent<Family>),
     NodeDisconnect(usize),
+    ImageButtonPressed,
 }
 
 fn view(state: &State) -> Element<'_, Message> {
@@ -412,17 +413,24 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             state.images.disconnect(i);
             Task::none()
         }
+        Message::ImageButtonPressed => {
+            println!("pressd");
+            Task::none()
+        }
     }
 }
 
 fn view_image(img: &Image) -> Element<'_, Message> {
     container(
         column![
-            image(img.path.clone())
-                .width(Fill)
-                .height(Fill)
-                .filter_method(image::FilterMethod::Nearest),
-            text(img.path.file_name().unwrap().to_str().unwrap().to_owned())
+            opaque(
+                image(img.path.clone())
+                    .width(Fill)
+                    .height(Fill)
+                    .filter_method(image::FilterMethod::Nearest)
+            ),
+            text(img.path.file_name().unwrap().to_str().unwrap().to_owned()),
+            button("ahkdlfjs").on_press(Message::ImageButtonPressed)
         ]
         .spacing(5.0),
     )
