@@ -458,6 +458,17 @@ where
                             state.position - node_pos
                                 + node_pos * Transformation::scale(1.0 / state.zoom),
                             |renderer| {
+                                // make sure the cursor position is transformed properly
+                                let cursor = match cursor {
+                                    Cursor::Unavailable => Cursor::Unavailable,
+                                    Cursor::Available(point) => Cursor::Available(
+                                        layout.position()
+                                            + (point - layout.position())
+                                                * Transformation::scale(1.0 / state.zoom)
+                                            - state.position,
+                                    ),
+                                };
+
                                 node.as_widget().draw(
                                     tree,
                                     renderer,
@@ -592,12 +603,39 @@ where
         event: iced::Event,
         layout: Layout<'_>,
         cursor: iced::advanced::mouse::Cursor,
-        _renderer: &Renderer,
-        _clipboard: &mut dyn iced::advanced::Clipboard,
+        renderer: &Renderer,
+        clipboard: &mut dyn iced::advanced::Clipboard,
         shell: &mut iced::advanced::Shell<'_, Message>,
         _viewport: &Rectangle,
     ) -> Status {
         let state = tree.state.downcast_mut::<GraphState<Attachment>>();
+
+        self.content
+            .iter_mut()
+            .zip(layout.children())
+            .zip(tree.children.iter_mut())
+            .for_each(|((element, node_layout), tree)| {
+                // make sure the cursor position is transformed properly
+                let cursor = match cursor {
+                    Cursor::Unavailable => Cursor::Unavailable,
+                    Cursor::Available(point) => Cursor::Available(
+                        layout.position()
+                            + (point - layout.position()) * Transformation::scale(1.0 / state.zoom)
+                            - state.position,
+                    ),
+                };
+
+                element.as_widget_mut().on_event(
+                    tree,
+                    event.clone(),
+                    node_layout,
+                    cursor,
+                    renderer,
+                    clipboard,
+                    shell,
+                    &node_layout.bounds(),
+                );
+            });
 
         let new_payload = layout
             .children()
