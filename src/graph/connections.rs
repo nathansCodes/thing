@@ -1,4 +1,8 @@
+use std::marker::PhantomData;
+
 use iced::{Point, Size, Vector, widget::canvas::Path};
+
+use crate::graph::line_styles;
 
 #[derive(Debug)]
 pub(super) struct Connection<A: Attachment = RelativeAttachment> {
@@ -29,7 +33,7 @@ pub trait Attachment: std::fmt::Debug + Clone + Send {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Edge {
     Top,
     Right,
@@ -38,33 +42,44 @@ pub enum Edge {
 }
 
 #[derive(Default, Debug, Clone)]
-pub enum RelativeAttachment {
+pub enum RelativeAttachment<Style = line_styles::Direct>
+where
+    Style: line_styles::LineStyle + std::fmt::Debug + Clone,
+{
     #[default]
     Center,
     Edge {
         edge: Edge,
         align: f32,
+        _phantom: PhantomData<Style>,
     },
 }
 
-impl RelativeAttachment {
+impl<Style> RelativeAttachment<Style>
+where
+    Style: line_styles::LineStyle + std::fmt::Debug + Clone,
+{
     pub fn all_edges<'a>() -> &'a [Self] {
         &[
             Self::Edge {
                 edge: Edge::Top,
                 align: 0.5,
+                _phantom: PhantomData,
             },
             Self::Edge {
                 edge: Edge::Right,
                 align: 0.5,
+                _phantom: PhantomData,
             },
             Self::Edge {
                 edge: Edge::Bottom,
                 align: 0.5,
+                _phantom: PhantomData,
             },
             Self::Edge {
                 edge: Edge::Left,
                 align: 0.5,
+                _phantom: PhantomData,
             },
         ]
     }
@@ -74,33 +89,44 @@ impl RelativeAttachment {
             Self::Edge {
                 edge: Edge::Top,
                 align: 0.0,
+                _phantom: PhantomData,
             },
             Self::Edge {
                 edge: Edge::Right,
                 align: 0.0,
+                _phantom: PhantomData,
             },
             Self::Edge {
                 edge: Edge::Bottom,
                 align: 1.0,
+                _phantom: PhantomData,
             },
             Self::Edge {
                 edge: Edge::Left,
                 align: 1.0,
+                _phantom: PhantomData,
             },
         ]
     }
 }
 
-impl Attachment for RelativeAttachment {
+impl<Style> Attachment for RelativeAttachment<Style>
+where
+    Style: line_styles::LineStyle + std::fmt::Debug + Clone + Send,
+{
     fn connection_point(&self) -> Vector {
         match self {
             Self::Center => Vector::new(0.5, 0.5),
-            Self::Edge { edge, align } => match edge {
+            Self::Edge { edge, align, .. } => match edge {
                 Edge::Top => Vector::new(*align, 0.0),
                 Edge::Right => Vector::new(1.0, *align),
                 Edge::Bottom => Vector::new(*align, 1.0),
                 Edge::Left => Vector::new(0.0, *align),
             },
         }
+    }
+
+    fn path(a: Self, a_point: Point, b: Self, b_point: Point) -> Path {
+        Style::path(a, a_point, b, b_point)
     }
 }
