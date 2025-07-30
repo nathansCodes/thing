@@ -45,7 +45,11 @@ impl<Data: std::fmt::Debug, Attachment: connections::Attachment> Default
     }
 }
 
-impl<Data: std::fmt::Debug, Attachment: self::Attachment> GraphData<Data, Attachment> {
+impl<Data, Attachment> GraphData<Data, Attachment>
+where
+    Data: std::fmt::Debug,
+    Attachment: self::Attachment,
+{
     pub fn get(&self, id: usize) -> Result<&GraphNode<Data>, GraphError> {
         self.nodes.get(id).ok_or(GraphError::NodeNotFound(id))
     }
@@ -134,6 +138,21 @@ impl<Data: std::fmt::Debug, Attachment: self::Attachment> GraphData<Data, Attach
 
     pub(crate) fn disconnect(&mut self, i: usize) {
         self.connections.remove(i);
+    }
+
+    pub(crate) fn remove(&mut self, i: usize) {
+        self.nodes.remove(i);
+        self.connections
+            .retain(|conn| conn.a.0 != i && conn.b.0 != i);
+
+        self.connections.iter_mut().for_each(|conn| {
+            if conn.a.0 > i {
+                conn.a.0 -= 1;
+            }
+            if conn.b.0 > i {
+                conn.b.0 -= 1;
+            }
+        });
     }
 }
 
