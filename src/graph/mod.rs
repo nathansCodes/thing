@@ -8,7 +8,7 @@ use iced::{
     Border, Color, Element, Event, Length, Padding, Point, Rectangle, Size, Theme, Transformation,
     Vector,
     advanced::{
-        Layout, Widget,
+        Clipboard, Layout, Shell, Widget,
         graphics::{core::event::Status, geometry::Frame},
         layout::{Limits, Node},
         renderer::{self, Quad},
@@ -247,6 +247,91 @@ where
                 }
 
                 None
+            })
+    }
+
+    fn get_payload(
+        &mut self,
+        layout: &Layout<'_>,
+        tree_children: &mut Vec<Tree>,
+        cursor: Cursor,
+        state: &GraphState<Attachment>,
+        event: Event,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        status: &mut Status,
+        shell: &mut Shell<'_, Message>,
+    ) -> Payload<Attachment> {
+        self.content
+            .iter_mut()
+            .zip(layout.children())
+            .zip(tree_children.iter_mut())
+            .zip(self.data.nodes.iter())
+            .enumerate()
+            .find_map(
+                |(i, (((element, node_layout), tree), data))| match cursor.position() {
+                    Some(cursor_pos) => {
+                        // make sure the cursor position is transformed properly
+                        let cursor = match cursor {
+                            Cursor::Unavailable => Cursor::Unavailable,
+                            Cursor::Available(point) => Cursor::Available(
+                                layout.position()
+                                    + (point - layout.position())
+                                        * Transformation::scale(1.0 / state.zoom)
+                                    - state.position,
+                            ),
+                        };
+
+                        let node_status = element.as_widget_mut().on_event(
+                            tree,
+                            event.clone(),
+                            node_layout,
+                            cursor,
+                            renderer,
+                            clipboard,
+                            shell,
+                            &node_layout.bounds(),
+                        );
+
+                        if node_status == Status::Captured {
+                            *status = Status::Captured;
+                        }
+
+                        let child_bounds = transform_node_bounds(
+                            node_layout.bounds(),
+                            state.zoom,
+                            state.position,
+                            data.position,
+                        );
+
+                        let hovered = child_bounds.contains(cursor_pos);
+
+                        let mut relative_cursor_pos = cursor_pos - child_bounds.position();
+
+                        relative_cursor_pos.x /= child_bounds.size().width;
+                        relative_cursor_pos.y /= child_bounds.size().height;
+
+                        let hovered_attachment = (self.get_attachment)(relative_cursor_pos);
+
+                        if !hovered && let Some(hovered_attachment) = hovered_attachment {
+                            return Some(Payload::Attachment(i, hovered_attachment));
+                        }
+
+                        if hovered {
+                            Some(Payload::Node(i, node_status))
+                        } else {
+                            None
+                        }
+                    }
+                    None => None,
+                },
+            )
+            .unwrap_or_else(|| {
+                cursor
+                    .position()
+                    .and_then(|cursor_pos| self.find_hovered_connection(state, cursor_pos, &layout))
+                    .map(Payload::Connection)
+                    .unwrap_or(Payload::Background)
             })
     }
 }
@@ -603,88 +688,27 @@ where
         tree: &mut Tree,
         event: iced::Event,
         layout: Layout<'_>,
-        cursor: iced::advanced::mouse::Cursor,
+        cursor: Cursor,
         renderer: &Renderer,
-        clipboard: &mut dyn iced::advanced::Clipboard,
-        shell: &mut iced::advanced::Shell<'_, Message>,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
         _viewport: &Rectangle,
     ) -> Status {
         let state = tree.state.downcast_mut::<GraphState<Attachment>>();
 
         let mut status = Status::Ignored;
 
-        let mut new_payload = self
-            .content
-            .iter_mut()
-            .zip(layout.children())
-            .zip(tree.children.iter_mut())
-            .zip(self.data.nodes.iter())
-            .enumerate()
-            .find_map(
-                |(i, (((element, node_layout), tree), data))| match cursor.position() {
-                    Some(cursor_pos) => {
-                        // make sure the cursor position is transformed properly
-                        let cursor = match cursor {
-                            Cursor::Unavailable => Cursor::Unavailable,
-                            Cursor::Available(point) => Cursor::Available(
-                                layout.position()
-                                    + (point - layout.position())
-                                        * Transformation::scale(1.0 / state.zoom)
-                                    - state.position,
-                            ),
-                        };
-
-                        let node_status = element.as_widget_mut().on_event(
-                            tree,
-                            event.clone(),
-                            node_layout,
-                            cursor,
-                            renderer,
-                            clipboard,
-                            shell,
-                            &node_layout.bounds(),
-                        );
-
-                        if node_status == Status::Captured {
-                            status = Status::Captured;
-                        }
-
-                        let child_bounds = transform_node_bounds(
-                            node_layout.bounds(),
-                            state.zoom,
-                            state.position,
-                            data.position,
-                        );
-
-                        let hovered = child_bounds.contains(cursor_pos);
-
-                        let mut relative_cursor_pos = cursor_pos - child_bounds.position();
-
-                        relative_cursor_pos.x /= child_bounds.size().width;
-                        relative_cursor_pos.y /= child_bounds.size().height;
-
-                        let hovered_attachment = (self.get_attachment)(relative_cursor_pos);
-
-                        if !hovered && let Some(hovered_attachment) = hovered_attachment {
-                            return Some(Payload::Attachment(i, hovered_attachment));
-                        }
-
-                        if hovered {
-                            Some(Payload::Node(i, node_status))
-                        } else {
-                            None
-                        }
-                    }
-                    None => None,
-                },
-            )
-            .unwrap_or_else(|| {
-                cursor
-                    .position()
-                    .and_then(|cursor_pos| self.find_hovered_connection(state, cursor_pos, &layout))
-                    .map(Payload::Connection)
-                    .unwrap_or(Payload::Background)
-            });
+        let mut new_payload = self.get_payload(
+            &layout,
+            &mut tree.children,
+            cursor,
+            state,
+            event.clone(),
+            renderer,
+            clipboard,
+            &mut status,
+            shell,
+        );
 
         match event {
             Event::Touch(ev) => {
