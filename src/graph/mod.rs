@@ -1,8 +1,10 @@
 pub mod connections;
 mod data;
 pub mod line_styles;
+mod state;
 
 pub use crate::graph::connections::{Attachment, RelativeAttachment};
+use crate::graph::state::{CursorState, GraphState, Payload};
 pub use data::GraphData;
 
 use iced::{
@@ -26,60 +28,6 @@ use lyon_algorithms::{
     },
     raycast::{Ray, raycast_path},
 };
-
-pub struct GraphState<Attachment = RelativeAttachment>
-where
-    Attachment: connections::Attachment,
-{
-    position: Vector,
-    cursor_state: CursorState<Attachment>,
-    pressed_mb: Option<Button>,
-    drag_origin: Point,
-    drag_start_point: Point,
-    zoom: f32,
-    shift_pressed: bool,
-    cursor_pos: Point,
-    debug: bool,
-    selection: Vec<usize>,
-}
-
-impl<Attachment: connections::Attachment> Default for GraphState<Attachment> {
-    fn default() -> Self {
-        Self {
-            position: Vector::ZERO,
-            cursor_state: CursorState::Hovering(Payload::Background),
-            pressed_mb: None,
-            drag_origin: Point::ORIGIN,
-            drag_start_point: Point::ORIGIN,
-            zoom: 1.0,
-            shift_pressed: false,
-            cursor_pos: Point::ORIGIN,
-            debug: false,
-            selection: Vec::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-enum Payload<Attachment = RelativeAttachment>
-where
-    Attachment: connections::Attachment + std::fmt::Debug,
-{
-    Background,
-    Node(usize, Status),
-    Attachment(usize, Attachment),
-    Connection(usize),
-    SelectionRect,
-}
-
-#[derive(Debug, Clone)]
-enum CursorState<Attachment = RelativeAttachment>
-where
-    Attachment: connections::Attachment + std::fmt::Debug,
-{
-    Hovering(Payload<Attachment>),
-    Dragging(Payload<Attachment>),
-}
 
 #[allow(clippy::type_complexity)]
 pub struct Graph<'a, Message, Renderer, Data, Attachment = RelativeAttachment>
