@@ -414,12 +414,8 @@ where
                             let a_attachment = connection.a.1.clone();
                             let b_attachment = connection.b.1.clone();
 
-                            let from = a.position
-                                + state.position
-                                + (a_size * a_attachment.connection_point()).into();
-                            let to = b.position
-                                + state.position
-                                + (b_size * b_attachment.connection_point()).into();
+                            let from = a_attachment.resolve(a_size, a.position + state.position);
+                            let to = b_attachment.resolve(b_size, b.position + state.position);
 
                             let path = Attachment::path(a_attachment, from, b_attachment, to);
 
@@ -447,22 +443,41 @@ where
                             }
                         }
 
-                        // draw currently dragging attachment line
-                        if let CursorState::Dragging(Payload::Attachment(i, attachment)) =
+                        if let CursorState::Hovering(Payload::Attachment(i, attachment)) =
                             &state.cursor_state
                         {
-                            let a = self.data.get(*i).unwrap();
+                            let node = self.data.get(*i).unwrap();
 
-                            let a_size = layout
+                            let size = layout
                                 .children()
                                 .nth(*i)
                                 .expect("Invalid connection")
                                 .bounds()
                                 .size();
 
-                            let from = a.position
-                                + state.position
-                                + (a_size * attachment.connection_point()).into();
+                            let attachment_point =
+                                attachment.resolve(size, node.position + state.position);
+
+                            frame.fill(
+                                &Path::circle(attachment_point, 10.0 / state.zoom),
+                                palette.primary.strong.color,
+                            );
+                        }
+
+                        // draw currently dragging attachment line
+                        if let CursorState::Dragging(Payload::Attachment(i, attachment)) =
+                            &state.cursor_state
+                        {
+                            let node = self.data.get(*i).unwrap();
+
+                            let size = layout
+                                .children()
+                                .nth(*i)
+                                .expect("Invalid connection")
+                                .bounds()
+                                .size();
+
+                            let from = attachment.resolve(size, node.position + state.position);
 
                             let to = (state.cursor_pos
                                 - Vector::new(bounds_position.x, bounds_position.y))
@@ -474,6 +489,10 @@ where
                                     .with_color(style.text_color)
                                     .with_width(5.0 / state.zoom)
                                     .with_line_cap(LineCap::Round),
+                            );
+                            frame.fill(
+                                &Path::circle(from, 7.5 / state.zoom),
+                                palette.primary.strong.color,
                             );
                         }
 
