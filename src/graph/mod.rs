@@ -5,8 +5,8 @@ pub use crate::graph::connections::{Attachment, RelativeAttachment};
 pub use data::GraphData;
 
 use iced::{
-    Border, Color, Element, Event, Length, Padding, Point, Rectangle, Size, Theme, Transformation,
-    Vector,
+    Border, Color, Element, Event, Length, Padding, Point, Rectangle, Shadow, Size, Theme,
+    Transformation, Vector,
     advanced::{
         Clipboard, Layout, Shell, Widget,
         graphics::{core::event::Status, geometry::Frame},
@@ -422,7 +422,7 @@ where
                             frame.stroke(
                                 &path,
                                 Stroke::default()
-                                    .with_color(style.text_color)
+                                    .with_color(palette.secondary.strong.color)
                                     .with_width(5.0 / state.zoom)
                                     .with_line_join(LineJoin::Bevel)
                                     .with_line_cap(LineCap::Round),
@@ -435,7 +435,7 @@ where
                                 frame.stroke(
                                     &path,
                                     Stroke::default()
-                                        .with_color(style.text_color.scale_alpha(0.3))
+                                        .with_color(palette.secondary.strong.color.scale_alpha(0.3))
                                         .with_width(10.0 / state.zoom)
                                         .with_line_join(LineJoin::Bevel)
                                         .with_line_cap(LineCap::Round),
@@ -486,7 +486,7 @@ where
                             frame.stroke(
                                 &Path::line(from, to),
                                 Stroke::default()
-                                    .with_color(style.text_color)
+                                    .with_color(palette.secondary.strong.color)
                                     .with_width(5.0 / state.zoom)
                                     .with_line_cap(LineCap::Round),
                             );
@@ -530,7 +530,7 @@ where
                                         bounds: rect,
                                         ..Default::default()
                                     },
-                                    style.text_color.scale_alpha(0.3),
+                                    palette.background.base.text.scale_alpha(0.3),
                                 );
                             }
                         }

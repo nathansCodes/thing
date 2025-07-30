@@ -25,7 +25,7 @@ use crate::{
 
 fn main() -> iced::Result {
     iced::application("Hello", update, view)
-        .theme(|_| Theme::CatppuccinMocha)
+        .theme(|_| Theme::TokyoNight)
         .run_with(|| {
             (
                 State {
