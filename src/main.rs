@@ -68,9 +68,9 @@ enum Pane {
 #[derive(Debug, Clone)]
 pub enum Message {
     AddImage(PathBuf),
-    Clicked(pane_grid::Pane),
-    Dragged(pane_grid::DragEvent),
-    Resized(pane_grid::ResizeEvent),
+    PaneClicked(pane_grid::Pane),
+    PaneDragged(pane_grid::DragEvent),
+    PaneResized(pane_grid::ResizeEvent),
     MenuItemPressed(MenuItem),
     AssetsMessage(AssetsMessage),
     FolderOpenFailed(IOError),
@@ -78,6 +78,7 @@ pub enum Message {
     NodeDragged(NodeDraggedEvent),
     NodeConnect(OnConnectEvent<RelativeAttachment<line_styles::Bezier>>),
     NodeDisconnect(usize),
+    NodeDeleted(usize),
     ImageButtonPressed,
 }
 
@@ -131,7 +132,8 @@ fn view(state: &State) -> Element<'_, Message> {
                     .on_node_dragged(Message::NodeDragged)
                     .node_attachments(RelativeAttachment::<line_styles::Bezier>::all_edges())
                     .on_connect(Message::NodeConnect)
-                    .on_disconnect(Message::NodeDisconnect);
+                    .on_disconnect(Message::NodeDisconnect)
+                    .on_delete(Message::NodeDeleted);
 
                 let graph = container(graph).style(|theme: &Theme| {
                     container::Style::default()
@@ -168,9 +170,9 @@ fn view(state: &State) -> Element<'_, Message> {
     .width(Fill)
     .height(Fill)
     .spacing(5.0)
-    .on_click(Message::Clicked)
-    .on_drag(Message::Dragged)
-    .on_resize(10, Message::Resized);
+    .on_click(Message::PaneClicked)
+    .on_drag(Message::PaneDragged)
+    .on_resize(10, Message::PaneResized);
 
     column![menu_bar, container(grid)].into()
 }
@@ -191,19 +193,19 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         }
         Message::AddImageFailed(_) => Task::none(),
-        Message::Clicked(pane) => {
+        Message::PaneClicked(pane) => {
             state.focus = Some(pane);
             Task::none()
         }
-        Message::Resized(pane_grid::ResizeEvent { split, ratio }) => {
+        Message::PaneResized(pane_grid::ResizeEvent { split, ratio }) => {
             state.panes.resize(split, ratio);
             Task::none()
         }
-        Message::Dragged(pane_grid::DragEvent::Dropped { pane, target }) => {
+        Message::PaneDragged(pane_grid::DragEvent::Dropped { pane, target }) => {
             state.panes.drop(pane, target);
             Task::none()
         }
-        Message::Dragged(_) => Task::none(),
+        Message::PaneDragged(_) => Task::none(),
         Message::MenuItemPressed(MenuItem::AddImage) => {
             Task::perform(pick_file(), |path_maybe| match path_maybe {
                 Ok(path) => Message::AddImage(path),
@@ -249,6 +251,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             state.images.disconnect(i);
             Task::none()
         }
+        Message::NodeDeleted(i) => {
+            state.images.remove(i);
+            Task::none()
+        }
         Message::ImageButtonPressed => {
             println!("pressd");
             Task::none()
@@ -259,14 +265,20 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
 fn view_image(img: &Image) -> Element<'_, Message> {
     container(
         column![
+            image(img.path.clone())
+                .width(Fill)
+                .height(Fill)
+                .filter_method(image::FilterMethod::Nearest),
             opaque(
-                image(img.path.clone())
-                    .width(Fill)
-                    .height(Fill)
-                    .filter_method(image::FilterMethod::Nearest)
+                column![
+                    text(img.path.file_name().unwrap().to_str().unwrap().to_owned())
+                        .center()
+                        .width(Fill),
+                    button("ahkdlfjs").on_press(Message::ImageButtonPressed)
+                ]
+                .width(Fill)
+                .spacing(5.0)
             ),
-            text(img.path.file_name().unwrap().to_str().unwrap().to_owned()),
-            button("ahkdlfjs").on_press(Message::ImageButtonPressed)
         ]
         .spacing(5.0),
     )

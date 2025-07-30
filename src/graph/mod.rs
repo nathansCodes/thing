@@ -17,7 +17,7 @@ use iced::{
         renderer::{self, Quad},
         widget::{Tree, tree},
     },
-    keyboard::{self, Key, Modifiers},
+    keyboard::{self, Key, Modifiers, key::Named},
     mouse::{self, Button, Cursor, ScrollDelta},
     widget::canvas::{LineCap, LineJoin, Path, Stroke},
 };
@@ -43,6 +43,7 @@ where
     get_attachment: Box<dyn Fn(Vector) -> Option<Attachment> + 'a>,
     on_connect: Option<Box<dyn Fn(OnConnectEvent<Attachment>) -> Message + 'a>>,
     on_disconnect: Option<Box<dyn Fn(usize) -> Message + 'a>>,
+    on_delete: Option<Box<dyn Fn(usize) -> Message + 'a>>,
 }
 
 impl<'a, Message, Renderer, Data, Attachment> Graph<'a, Message, Renderer, Data, Attachment>
@@ -68,6 +69,7 @@ where
             get_attachment: Box::new(|_| None),
             on_connect: None,
             on_disconnect: None,
+            on_delete: None,
         }
     }
 
@@ -117,6 +119,14 @@ where
         F: 'a + Fn(usize) -> Message,
     {
         self.on_disconnect = Some(Box::new(callback));
+        self
+    }
+
+    pub fn on_delete<F>(mut self, callback: F) -> Self
+    where
+        F: 'a + Fn(usize) -> Message,
+    {
+        self.on_delete = Some(Box::new(callback));
         self
     }
 
@@ -788,7 +798,9 @@ where
                             }
 
                             if status == &Status::Ignored
-                                && state.pressed_mb == Some(Button::Middle)
+                                && (state.pressed_mb == Some(Button::Middle)
+                                    || state.pressed_mb == Some(Button::Left)
+                                        && state.shift_pressed)
                             {
                                 state.cursor_state = CursorState::Dragging(new_payload);
                             } else {
@@ -935,9 +947,7 @@ where
                         }
                     }
                     CursorState::Hovering(Payload::Node(id, old_status))
-                        if state.shift_pressed
-                            && old_status == &Status::Ignored
-                            && status == Status::Ignored =>
+                        if old_status == &Status::Ignored && status == Status::Ignored =>
                     {
                         if let Some(index) = state.selection.iter().position(|s| s == id) {
                             state.selection.remove(index);
@@ -977,6 +987,49 @@ where
                 }
 
                 status = Status::Captured;
+            }
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: Key::Named(Named::Delete),
+                ..
+            }) => {
+                if let Some(on_delete) = &self.on_delete {
+                    for (i, selection) in state.selection.iter().enumerate() {
+                        let mut selection = *selection;
+
+                        // find how many of the previous selections have an id less than the
+                        // current one and subtract the current one from that. we don't want an
+                        // an out of bounds memory access
+                        let correction = state
+                            .selection
+                            .iter()
+                            .take(i)
+                            .filter(|s| **s < selection)
+                            .count();
+
+                        selection -= correction.min(i);
+
+                        if let Payload::Node(id, _) = new_payload
+                            && id == selection
+                        {
+                            state.cursor_state = CursorState::Hovering(Payload::Background);
+                        } else if let Payload::Connection(id) = new_payload {
+                            if self.data.connections[id].a.0 == selection
+                                || self.data.connections[id].b.0 == selection
+                            {
+                                state.cursor_state = CursorState::Hovering(Payload::Background);
+                            }
+                        } else if let Payload::Attachment(id, _) = new_payload
+                            && id == selection
+                        {
+                            state.cursor_state = CursorState::Hovering(Payload::Background);
+                        }
+
+                        shell.publish(on_delete(selection));
+                    }
+
+                    state.selection.clear();
+                    status = Status::Captured;
+                }
             }
             Event::Keyboard(keyboard::Event::ModifiersChanged(mods)) => {
                 state.shift_pressed = mods.contains(Modifiers::SHIFT);
