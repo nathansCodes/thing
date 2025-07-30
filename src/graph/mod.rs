@@ -907,8 +907,11 @@ where
                         let mut top_left = state.drag_start_point;
                         let mut bottom_right = state.cursor_pos;
 
-                        if bottom_right.distance(Point::ORIGIN) < top_left.distance(Point::ORIGIN) {
-                            std::mem::swap(&mut top_left, &mut bottom_right);
+                        if bottom_right.x < top_left.x {
+                            std::mem::swap(&mut top_left.x, &mut bottom_right.x);
+                        }
+                        if bottom_right.y < top_left.y {
+                            std::mem::swap(&mut top_left.y, &mut bottom_right.y);
                         }
 
                         let rect = Rectangle::new(top_left, (bottom_right - top_left).into());
