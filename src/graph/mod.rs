@@ -65,7 +65,7 @@ where
     Attachment: connections::Attachment + std::fmt::Debug,
 {
     Background,
-    Node(usize),
+    Node(usize, Status),
     Attachment(usize, Attachment),
     Connection(usize),
     SelectionRect,
@@ -454,6 +454,7 @@ where
                 renderer.with_layer(bounds, |renderer| {
                     renderer.with_transformation(Transformation::scale(state.zoom), |renderer| {
                         let node_pos = Vector::new(layout.position().x, layout.position().y);
+
                         renderer.with_translation(
                             state.position - node_pos
                                 + node_pos * Transformation::scale(1.0 / state.zoom),
@@ -610,67 +611,73 @@ where
     ) -> Status {
         let state = tree.state.downcast_mut::<GraphState<Attachment>>();
 
-        self.content
+        let mut status = Status::Ignored;
+
+        let mut new_payload = self
+            .content
             .iter_mut()
             .zip(layout.children())
             .zip(tree.children.iter_mut())
-            .for_each(|((element, node_layout), tree)| {
-                // make sure the cursor position is transformed properly
-                let cursor = match cursor {
-                    Cursor::Unavailable => Cursor::Unavailable,
-                    Cursor::Available(point) => Cursor::Available(
-                        layout.position()
-                            + (point - layout.position()) * Transformation::scale(1.0 / state.zoom)
-                            - state.position,
-                    ),
-                };
-
-                element.as_widget_mut().on_event(
-                    tree,
-                    event.clone(),
-                    node_layout,
-                    cursor,
-                    renderer,
-                    clipboard,
-                    shell,
-                    &node_layout.bounds(),
-                );
-            });
-
-        let new_payload = layout
-            .children()
             .zip(self.data.nodes.iter())
             .enumerate()
-            .find_map(|(i, (child, data))| match cursor.position() {
-                Some(cursor_pos) => {
-                    let child_bounds = transform_node_bounds(
-                        child.bounds(),
-                        state.zoom,
-                        state.position,
-                        data.position,
-                    );
+            .find_map(
+                |(i, (((element, node_layout), tree), data))| match cursor.position() {
+                    Some(cursor_pos) => {
+                        // make sure the cursor position is transformed properly
+                        let cursor = match cursor {
+                            Cursor::Unavailable => Cursor::Unavailable,
+                            Cursor::Available(point) => Cursor::Available(
+                                layout.position()
+                                    + (point - layout.position())
+                                        * Transformation::scale(1.0 / state.zoom)
+                                    - state.position,
+                            ),
+                        };
 
-                    let hovered = child_bounds.contains(cursor_pos);
+                        let node_status = element.as_widget_mut().on_event(
+                            tree,
+                            event.clone(),
+                            node_layout,
+                            cursor,
+                            renderer,
+                            clipboard,
+                            shell,
+                            &node_layout.bounds(),
+                        );
 
-                    let mut relative_cursor_pos = cursor_pos - child_bounds.position();
+                        if node_status == Status::Captured {
+                            status = Status::Captured;
+                        }
 
-                    relative_cursor_pos.x /= child_bounds.size().width;
-                    relative_cursor_pos.y /= child_bounds.size().height;
+                        let child_bounds = transform_node_bounds(
+                            node_layout.bounds(),
+                            state.zoom,
+                            state.position,
+                            data.position,
+                        );
 
-                    let hovered_attachment = (self.get_attachment)(relative_cursor_pos);
+                        let hovered = child_bounds.contains(cursor_pos);
 
-                    if let Some(hovered_attachment) = hovered_attachment {
-                        return Some(Payload::Attachment(i, hovered_attachment));
+                        let mut relative_cursor_pos = cursor_pos - child_bounds.position();
+
+                        relative_cursor_pos.x /= child_bounds.size().width;
+                        relative_cursor_pos.y /= child_bounds.size().height;
+
+                        let hovered_attachment = (self.get_attachment)(relative_cursor_pos);
+
+                        if !hovered && let Some(hovered_attachment) = hovered_attachment {
+                            return Some(Payload::Attachment(i, hovered_attachment));
+                        }
+
+                        if hovered {
+                            Some(Payload::Node(i, node_status))
+                        } else {
+                            None
+                        }
                     }
-
-                    if hovered {
-                        Some(Payload::Node(i))
-                    } else {
-                        None
-                    }
-                }
-                None => None,
-            })
+                    None => None,
+                },
+            )
             .unwrap_or_else(|| {
                 cursor
                     .position()
@@ -682,7 +689,6 @@ where
         match event {
             Event::Touch(ev) => {
                 dbg!(ev);
-                Status::Ignored
             }
             Event::Mouse(mouse::Event::CursorMoved {
                 position: cursor_pos,
@@ -705,8 +711,10 @@ where
                             state.position.y = new_position.y;
                             shell.invalidate_layout();
                         }
-                        Payload::Node(id) => {
-                            if let Some(on_node_dragged) = &self.on_node_dragged {
+                        Payload::Node(id, status) => {
+                            if status == &Status::Ignored
+                                && let Some(on_node_dragged) = &self.on_node_dragged
+                            {
                                 let mut new_position = state.drag_origin
                                     + (cursor_pos - state.drag_start_point)
                                         * Transformation::scale(1.0 / state.zoom);
@@ -778,13 +786,20 @@ where
                                 CursorState::Hovering(new_payload)
                             };
                         }
-                        Payload::Node(id) => {
+                        Payload::Node(id, status) => {
                             state.drag_origin = self.data.nodes[*id].position;
                             state.drag_start_point = cursor_pos;
-                            state.cursor_state = if state.pressed_mb == Some(Button::Middle) {
-                                CursorState::Dragging(new_payload)
+
+                            if status == &Status::Captured {
+                                new_payload = Payload::Node(*id, Status::Captured);
+                            }
+
+                            if status == &Status::Ignored
+                                && state.pressed_mb == Some(Button::Middle)
+                            {
+                                state.cursor_state = CursorState::Dragging(new_payload);
                             } else {
-                                CursorState::Hovering(new_payload)
+                                state.cursor_state = CursorState::Hovering(new_payload);
                             };
                         }
                         Payload::Attachment(id, _) => {
@@ -855,22 +870,22 @@ where
                     },
                 }
 
-                Status::Captured
+                status = Status::Captured;
             }
-            Event::Mouse(mouse::Event::ButtonPressed(button)) => {
+            Event::Mouse(mouse::Event::ButtonPressed(button)) => 'ev: {
                 let Some(cursor_pos) = cursor.position() else {
-                    return Status::Ignored;
+                    break 'ev;
                 };
 
                 if !layout.bounds().contains(cursor_pos) {
-                    return Status::Ignored;
+                    break 'ev;
                 }
 
                 state.pressed_mb = Some(button);
 
                 state.cursor_state = CursorState::Hovering(new_payload);
 
-                Status::Captured
+                status = Status::Captured;
             }
             Event::Mouse(mouse::Event::ButtonReleased(Button::Left | Button::Middle)) => {
                 state.pressed_mb = None;
@@ -915,13 +930,19 @@ where
 
                         if state.shift_pressed {
                             state.selection.append(&mut selected);
+
+                            // remove duplicates
                             state.selection.sort();
                             state.selection.dedup();
                         } else {
                             state.selection = selected;
                         }
                     }
-                    CursorState::Hovering(Payload::Node(id)) if state.shift_pressed => {
+                    CursorState::Hovering(Payload::Node(id, old_status))
+                        if state.shift_pressed
+                            && old_status == &Status::Ignored
+                            && status == Status::Ignored =>
+                    {
                         if let Some(index) = state.selection.iter().position(|s| s == id) {
                             state.selection.remove(index);
                         } else {
@@ -936,15 +957,15 @@ where
 
                 state.cursor_state = CursorState::Hovering(new_payload);
 
-                Status::Captured
+                status = Status::Captured;
             }
-            Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+            Event::Mouse(mouse::Event::WheelScrolled { delta }) => 'ev: {
                 let Some(cursor_pos) = cursor.position() else {
-                    return Status::Ignored;
+                    break 'ev;
                 };
 
                 if !layout.bounds().contains(cursor_pos) {
-                    return Status::Ignored;
+                    break 'ev;
                 }
 
                 let (delta_x, delta_y) = match delta {
@@ -959,12 +980,12 @@ where
                     state.zoom = state.zoom.clamp(0.3, 2.0);
                 }
 
-                Status::Captured
+                status = Status::Captured;
             }
             Event::Keyboard(keyboard::Event::ModifiersChanged(mods)) => {
                 state.shift_pressed = mods.contains(Modifiers::SHIFT);
 
-                Status::Captured
+                status = Status::Captured;
             }
             Event::Keyboard(keyboard::Event::KeyReleased {
                 key: Key::Character(char),
@@ -973,13 +994,13 @@ where
             }) => {
                 if char.eq("d") {
                     state.debug = !state.debug;
-                    Status::Captured
-                } else {
-                    Status::Ignored
+                    status = Status::Captured;
                 }
             }
-            _ => Status::Ignored,
-        }
+            _ => (),
+        };
+
+        status
     }
 }
 
