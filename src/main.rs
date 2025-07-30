@@ -3,16 +3,16 @@ mod file_picker;
 mod graph;
 mod style;
 
-use crate::graph::{Attachment, OnConnectEvent};
+use crate::graph::{OnConnectEvent, RelativeAttachment, line_styles};
 
 use iced::{
     Alignment, Border, Element, Font,
     Length::Fill,
-    Padding, Point, Task, Theme, Vector,
+    Padding, Point, Task, Theme,
     font::Weight,
     widget::{
-        button, canvas::Path, column, container, image, opaque, pane_grid,
-        pane_grid::Configuration, pick_list, row, text,
+        button, column, container, image, opaque, pane_grid, pane_grid::Configuration, pick_list,
+        row, text,
     },
 };
 use std::path::PathBuf;
@@ -45,165 +45,6 @@ fn main() -> iced::Result {
         })
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum Family {
-    Parent,
-    Child,
-    SiblingLeft,
-    SiblingRight,
-}
-
-impl Attachment for Family {
-    fn connection_point(&self) -> iced::Vector {
-        match self {
-            Family::Parent => Vector::new(0.5, 0.0),
-            Family::Child => Vector::new(0.5, 1.0),
-            Family::SiblingLeft => Vector::new(0.0, 0.5),
-            Family::SiblingRight => Vector::new(1.0, 0.5),
-        }
-    }
-
-    fn path(a: Self, a_point: Point, b: Self, b_point: Point) -> iced::widget::canvas::Path {
-        let mut a_point = a_point;
-        let mut b_point = b_point;
-
-        // swap if needed
-        let (a, b) = match (a, b) {
-            (Self::SiblingLeft, Self::SiblingRight) => {
-                std::mem::swap(&mut a_point, &mut b_point);
-
-                (Self::SiblingRight, Self::SiblingLeft)
-            }
-            (Self::Child, Self::Parent) => {
-                std::mem::swap(&mut a_point, &mut b_point);
-
-                (Self::Parent, Self::Child)
-            }
-            (a, b)
-                if (a == Self::Parent || a == Self::Child)
-                    && (b == Self::SiblingLeft || b == Self::SiblingRight) =>
-            {
-                std::mem::swap(&mut a_point, &mut b_point);
-
-                (b, a.clone())
-            }
-            others => others,
-        };
-
-        let a_direction = match a {
-            Self::Parent => Vector::new(0.0, -1.0),
-            Self::Child => Vector::new(0.0, 1.0),
-            Self::SiblingLeft => Vector::new(-1.0, 0.0),
-            Self::SiblingRight => Vector::new(1.0, 0.0),
-        };
-
-        let b_direction = match b {
-            Self::Parent => Vector::new(0.0, -1.0),
-            Self::Child => Vector::new(0.0, 1.0),
-            Self::SiblingLeft => Vector::new(-1.0, 0.0),
-            Self::SiblingRight => Vector::new(1.0, 0.0),
-        };
-
-        Path::new(|builder| {
-            builder.move_to(a_point);
-
-            let a_vector = Vector::new(a_point.x, a_point.y);
-            let b_vector = Vector::new(b_point.x, b_point.y);
-
-            let a_stub = a_point + a_direction * 25.0;
-            let b_stub = b_point + b_direction * 25.0;
-
-            match (a, b) {
-                // if they're the same
-                (a, b) if a == b => {
-                    let (connecting_start, connecting_end) = match a_direction {
-                        Vector { x: 0.0, y } => {
-                            let mut connecting_start = a_stub;
-                            let mut connecting_end = b_stub;
-
-                            let y = if y == 1.0 {
-                                f32::max(connecting_start.y, connecting_end.y)
-                            } else {
-                                f32::min(connecting_start.y, connecting_end.y)
-                            };
-
-                            connecting_start.y = y;
-                            connecting_end.y = y;
-
-                            (connecting_start, connecting_end)
-                        }
-                        Vector { x, y: 0.0 } => {
-                            let mut connecting_start = a_stub;
-                            let mut connecting_end = b_stub;
-
-                            let x = if x == 1.0 {
-                                f32::max(connecting_start.x, connecting_end.x)
-                            } else {
-                                f32::min(connecting_start.x, connecting_end.x)
-                            };
-
-                            connecting_start.x = x;
-                            connecting_end.x = x;
-
-                            (connecting_start, connecting_end)
-                        }
-                        _ => unreachable!(),
-                    };
-
-                    builder.line_to(connecting_start);
-                    builder.line_to(connecting_end);
-
-                    builder.line_to(b_point);
-                }
-                // side and other side
-                // or top and bottom
-                (Self::Parent, Self::Child) | (Self::SiblingRight, Self::SiblingLeft) => {
-                    let halfway_vector = (b_vector - a_vector) * 0.5;
-
-                    builder.line_to(a_stub);
-
-                    if a_stub.x * a_direction.x.abs() < b_stub.x * b_direction.x.abs()
-                        || a_stub.y * a_direction.y.abs() > b_stub.y * b_direction.y.abs()
-                    {
-                        builder.line_to(Point::new(
-                            a_point.x + halfway_vector.x * a_direction.x,
-                            a_point.y - halfway_vector.y * a_direction.y,
-                        ));
-
-                        builder.line_to(Point::new(
-                            b_point.x + halfway_vector.x * b_direction.x,
-                            b_point.y - halfway_vector.y * b_direction.y,
-                        ));
-                    } else if a_direction.x == 0.0 {
-                        builder.line_to(Point::new(a_stub.x + halfway_vector.x, a_stub.y));
-                        builder.line_to(Point::new(b_stub.x - halfway_vector.x, b_stub.y));
-                    } else {
-                        builder.line_to(Point::new(a_stub.x, a_stub.y + halfway_vector.y));
-                        builder.line_to(Point::new(b_stub.x, b_stub.y - halfway_vector.y));
-                    }
-
-                    builder.line_to(b_stub);
-
-                    builder.line_to(b_point);
-                }
-                // side with top/bottom
-                (Self::SiblingLeft, Self::Parent)
-                | (Self::SiblingRight, Self::Parent)
-                | (Self::SiblingLeft, Self::Child)
-                | (Self::SiblingRight, Self::Child) => {
-                    builder.line_to(a_stub);
-
-                    builder.line_to(Point::new(a_stub.x, b_stub.y));
-
-                    builder.line_to(b_stub);
-                    builder.line_to(b_point);
-                }
-                _ => unreachable!(),
-            }
-        })
-    }
-}
-
 #[derive(Clone, Debug, Default)]
 struct Image {
     path: PathBuf,
@@ -211,7 +52,7 @@ struct Image {
 
 struct State {
     folder: Option<PathBuf>,
-    images: GraphData<Image, Family>,
+    images: GraphData<Image, RelativeAttachment<line_styles::Bezier>>,
     panes: pane_grid::State<Pane>,
     assets: assets::AssetsPane,
     focus: Option<pane_grid::Pane>,
@@ -235,7 +76,7 @@ pub enum Message {
     FolderOpenFailed(IOError),
     AddImageFailed(IOError),
     NodeDragged(NodeDraggedEvent),
-    NodeConnect(OnConnectEvent<Family>),
+    NodeConnect(OnConnectEvent<RelativeAttachment<line_styles::Bezier>>),
     NodeDisconnect(usize),
     ImageButtonPressed,
 }
@@ -288,12 +129,7 @@ fn view(state: &State) -> Element<'_, Message> {
             Pane::Graph => {
                 let graph = Graph::new(&state.images, view_image)
                     .on_node_dragged(Message::NodeDragged)
-                    .node_attachments(&[
-                        Family::Parent,
-                        Family::Child,
-                        Family::SiblingLeft,
-                        Family::SiblingRight,
-                    ])
+                    .node_attachments(RelativeAttachment::<line_styles::Bezier>::all_edges())
                     .on_connect(Message::NodeConnect)
                     .on_disconnect(Message::NodeDisconnect);
 

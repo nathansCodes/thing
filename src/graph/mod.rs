@@ -1,12 +1,13 @@
 pub mod connections;
 mod data;
+pub mod line_styles;
 
 pub use crate::graph::connections::{Attachment, RelativeAttachment};
 pub use data::GraphData;
 
 use iced::{
-    Border, Color, Element, Event, Length, Padding, Point, Rectangle, Shadow, Size, Theme,
-    Transformation, Vector,
+    Border, Color, Element, Event, Length, Padding, Point, Rectangle, Size, Theme, Transformation,
+    Vector,
     advanced::{
         Clipboard, Layout, Shell, Widget,
         graphics::{core::event::Status, geometry::Frame},
