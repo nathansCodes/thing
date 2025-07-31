@@ -44,6 +44,7 @@ where
     on_connect: Option<Box<dyn Fn(OnConnectEvent<Attachment>) -> Message + 'a>>,
     on_disconnect: Option<Box<dyn Fn(usize) -> Message + 'a>>,
     on_delete: Option<Box<dyn Fn(usize) -> Message + 'a>>,
+    on_connection_dropped: Option<Box<dyn Fn(usize, Attachment) -> Message + 'a>>,
 }
 
 impl<'a, Message, Renderer, Data, Attachment> Graph<'a, Message, Renderer, Data, Attachment>
@@ -70,15 +71,8 @@ where
             on_connect: None,
             on_disconnect: None,
             on_delete: None,
+            on_connection_dropped: None,
         }
-    }
-
-    pub fn on_node_dragged<F>(mut self, callback: F) -> Self
-    where
-        F: 'a + Fn(NodeDraggedEvent) -> Message,
-    {
-        self.on_node_dragged = Some(Box::new(callback));
-        self
     }
 
     pub fn attachment_under_cursor<F>(mut self, cursor_over_attachment: F) -> Self
@@ -106,6 +100,14 @@ where
         self
     }
 
+    pub fn on_node_dragged<F>(mut self, callback: F) -> Self
+    where
+        F: 'a + Fn(NodeDraggedEvent) -> Message,
+    {
+        self.on_node_dragged = Some(Box::new(callback));
+        self
+    }
+
     pub fn on_connect<F>(mut self, callback: F) -> Self
     where
         F: 'a + Fn(OnConnectEvent<Attachment>) -> Message,
@@ -127,6 +129,14 @@ where
         F: 'a + Fn(usize) -> Message,
     {
         self.on_delete = Some(Box::new(callback));
+        self
+    }
+
+    pub fn on_connection_dropped<F>(mut self, callback: F) -> Self
+    where
+        F: 'a + Fn(usize, Attachment) -> Message,
+    {
+        self.on_connection_dropped = Some(Box::new(callback));
         self
     }
 
@@ -906,6 +916,10 @@ where
                                 b,
                                 b_attachment,
                             }));
+                        } else if matches!(new_payload, Payload::Background)
+                            && let Some(on_connection_dropped) = &self.on_connection_dropped
+                        {
+                            shell.publish(on_connection_dropped(*a, a_attachment.clone()))
                         }
                     }
                     CursorState::Dragging(Payload::SelectionRect) => {
