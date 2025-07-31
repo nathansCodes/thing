@@ -171,16 +171,12 @@ where
             return;
         }
 
-        println!();
-
         while !stack.is_empty() {
             if visited.len() == self.nodes.len() {
                 break;
             }
 
             let current_node = *stack.iter().last().unwrap();
-
-            println!("{current_node}: {:?}", &self.nodes[current_node]);
 
             if !visited.contains(&current_node) {
                 f(current_node, &self.nodes[current_node]);
@@ -220,16 +216,12 @@ where
         visited.push(starting_node);
         f(starting_node, &self.nodes[starting_node]);
 
-        println!();
-
         while !queue.is_empty() {
             if visited.len() == self.nodes.len() {
                 break;
             }
 
             let current_node = *queue.front().unwrap();
-
-            println!("{current_node}: {:?}", &self.nodes[current_node]);
 
             let unvisited_connections: Vec<_> = self
                 .connections
@@ -246,7 +238,6 @@ where
             visited.extend(unvisited_connections.iter());
 
             for node in &unvisited_connections {
-                println!("    {node}: {:?}", &self.nodes[*node]);
                 f(*node, &self.nodes[*node]);
             }
 
