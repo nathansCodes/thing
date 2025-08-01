@@ -1074,6 +1074,9 @@ where
                     CursorState::Hovering(Payload::Node(id, old_status))
                         if old_status == &Status::Ignored && status == Status::Ignored =>
                     {
+                        if !state.shift_pressed {
+                            state.selection.clear();
+                        }
                         if let Some(index) = state.selection.iter().position(|s| s == id) {
                             state.selection.remove(index);
                         } else {
