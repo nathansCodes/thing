@@ -11,7 +11,7 @@ pub trait LineStyle: Sized + std::fmt::Debug + Clone {
     ) -> Path;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Direct;
 
 impl LineStyle for Direct {
@@ -25,7 +25,7 @@ impl LineStyle for Direct {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AxisAligned;
 
 impl LineStyle for AxisAligned {
@@ -209,7 +209,7 @@ impl LineStyle for AxisAligned {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Bezier;
 
 impl LineStyle for Bezier {
