@@ -1,10 +1,11 @@
 use std::marker::PhantomData;
 
 use iced::{Point, Size, Vector, widget::canvas::Path};
+use serde::{Deserialize, Serialize};
 
 use crate::graph::line_styles;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub(super) struct Connection<A: Attachment = RelativeAttachment> {
     pub a: (usize, A),
     pub b: (usize, A),
@@ -33,7 +34,7 @@ pub trait Attachment: std::fmt::Debug + Clone + Send {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Edge {
     Top,
     Right,
@@ -41,7 +42,7 @@ pub enum Edge {
     Left,
 }
 
-#[derive(Default, Debug, Clone, PartialEq)]
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum RelativeAttachment<Style = line_styles::Direct>
 where
     Style: line_styles::LineStyle + std::fmt::Debug + Clone,
@@ -51,6 +52,7 @@ where
     Edge {
         edge: Edge,
         align: f32,
+        #[serde(skip)]
         _phantom: PhantomData<Style>,
     },
 }

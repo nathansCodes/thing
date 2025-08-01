@@ -8,7 +8,7 @@ use iced::{
     widget::{column, container, image, mouse_area, row, scrollable, text},
 };
 
-use crate::file_picker::IOError;
+use crate::io::IOError;
 
 #[derive(Default, Debug, Clone, Copy)]
 pub enum AssetType {

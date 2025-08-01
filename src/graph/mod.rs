@@ -41,7 +41,7 @@ where
     data: &'a GraphData<Data, Attachment>,
     content: Vec<Element<'a, Message, Theme, Renderer>>,
     on_node_dragged: Option<Box<dyn Fn(NodeDraggedEvent) -> Message + 'a>>,
-    get_attachment: Box<dyn Fn(Vector) -> Option<Attachment> + 'a>,
+    get_attachment: Box<dyn Fn(&'a Data, Vector) -> Option<Attachment> + 'a>,
     on_connect: Option<Box<dyn Fn(OnConnectEvent<Attachment>) -> Message + 'a>>,
     on_disconnect: Option<Box<dyn Fn(usize) -> Message + 'a>>,
     on_delete: Option<Box<dyn Fn(usize) -> Message + 'a>>,
@@ -70,7 +70,7 @@ where
             data,
             content,
             on_node_dragged: None,
-            get_attachment: Box::new(|_| None),
+            get_attachment: Box::new(|_, _| None),
             on_connect: None,
             on_disconnect: None,
             on_delete: None,
@@ -80,17 +80,29 @@ where
         }
     }
 
-    pub fn attachment_under_cursor<F>(mut self, cursor_over_attachment: F) -> Self
-    where
-        F: Fn(Vector) -> Option<Attachment> + 'a,
-    {
-        self.get_attachment = Box::new(cursor_over_attachment);
+    pub fn node_attachments(mut self, attachments: &'a [Attachment]) -> Self {
+        self.get_attachment = Box::new(|_data, relative_cursor_pos| {
+            attachments
+                .iter()
+                .find(|att| {
+                    let mut diff = relative_cursor_pos - att.connection_point();
+
+                    diff.x = diff.x.abs();
+                    diff.y = diff.y.abs();
+
+                    diff.x < 0.15 && diff.y < 0.15
+                })
+                .cloned()
+        });
         self
     }
 
-    pub fn node_attachments(mut self, attachments: &'a [Attachment]) -> Self {
-        self.get_attachment = Box::new(|relative_cursor_pos| {
-            attachments
+    pub fn per_node_attachments<F>(mut self, get_attachments: F) -> Self
+    where
+        F: Fn(&'a Data) -> &'a [Attachment] + 'a,
+    {
+        self.get_attachment = Box::new(move |data, relative_cursor_pos| {
+            get_attachments(data)
                 .iter()
                 .find(|att| {
                     let mut diff = relative_cursor_pos - att.connection_point();
@@ -296,7 +308,8 @@ where
                         relative_cursor_pos.x /= child_bounds.size().width;
                         relative_cursor_pos.y /= child_bounds.size().height;
 
-                        let hovered_attachment = (self.get_attachment)(relative_cursor_pos);
+                        let hovered_attachment =
+                            (self.get_attachment)(&data.data, relative_cursor_pos);
 
                         if !hovered && let Some(hovered_attachment) = hovered_attachment {
                             return Some(Payload::Attachment(i, hovered_attachment));
