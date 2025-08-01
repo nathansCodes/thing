@@ -43,8 +43,6 @@ pub async fn load(mut path: PathBuf) -> Result<String, IOError> {
         std::fs::File::create(path)?
     };
 
-    println!("{file:?}");
-
     let mut data = String::new();
 
     file.read_to_string(&mut data)?;
