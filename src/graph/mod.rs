@@ -35,7 +35,7 @@ pub struct Graph<'a, Message, Renderer, Data, Attachment = RelativeAttachment>
 where
     Renderer: iced::advanced::image::Renderer,
     Data: std::fmt::Debug,
-    Attachment: connections::Attachment,
+    Attachment: connections::Attachment + PartialEq,
     Message: 'a,
 {
     data: &'a GraphData<Data, Attachment>,
@@ -46,13 +46,15 @@ where
     on_disconnect: Option<Box<dyn Fn(usize) -> Message + 'a>>,
     on_delete: Option<Box<dyn Fn(usize) -> Message + 'a>>,
     on_connection_dropped: Option<Box<dyn Fn(usize, Attachment) -> Message + 'a>>,
+    allow_self_connections: bool,
+    allow_similar_connections: bool,
 }
 
 impl<'a, Message, Renderer, Data, Attachment> Graph<'a, Message, Renderer, Data, Attachment>
 where
     Renderer: iced::advanced::image::Renderer + iced::advanced::graphics::geometry::Renderer,
     Data: std::fmt::Debug,
-    Attachment: connections::Attachment + 'static,
+    Attachment: connections::Attachment + PartialEq + 'static,
 {
     pub fn new<F>(data: &'a GraphData<Data, Attachment>, view_node: F) -> Self
     where
@@ -73,6 +75,8 @@ where
             on_disconnect: None,
             on_delete: None,
             on_connection_dropped: None,
+            allow_self_connections: false,
+            allow_similar_connections: false,
         }
     }
 
@@ -98,6 +102,16 @@ where
                 })
                 .cloned()
         });
+        self
+    }
+
+    pub fn allow_similar_connections(mut self, value: bool) -> Self {
+        self.allow_similar_connections = value;
+        self
+    }
+
+    pub fn allow_self_connections(mut self, value: bool) -> Self {
+        self.allow_self_connections = value;
         self
     }
 
@@ -312,7 +326,7 @@ impl<'a, Message, Renderer, Data, Attachment> Widget<Message, Theme, Renderer>
 where
     Renderer: iced::advanced::image::Renderer + iced::advanced::graphics::geometry::Renderer,
     Data: std::fmt::Debug,
-    Attachment: connections::Attachment + 'static,
+    Attachment: connections::Attachment + PartialEq + 'static,
 {
     fn size(&self) -> Size<iced::Length> {
         Size::new(Length::Fill, Length::Fill)
@@ -974,12 +988,32 @@ where
                         if let Payload::Attachment(b, b_attachment) = new_payload.clone()
                             && let Some(on_connect) = &self.on_connect
                         {
-                            shell.publish(on_connect(OnConnectEvent::<Attachment> {
-                                a: *a,
-                                a_attachment: a_attachment.clone(),
-                                b,
-                                b_attachment,
-                            }));
+                            let mut allowed = true;
+
+                            if !self.allow_self_connections && *a == b {
+                                allowed = false;
+                            }
+
+                            if !self.allow_similar_connections
+                                && let Some((id, _)) =
+                                    self.data.connections.iter().enumerate().find(|(_, conn)| {
+                                        (conn.a.0 == *a && conn.b.0 == b)
+                                            || (conn.a.0 == b && conn.b.0 == *a)
+                                    })
+                            {
+                                if let Some(on_disconnect) = &self.on_disconnect {
+                                    shell.publish(on_disconnect(id));
+                                }
+                            }
+
+                            if allowed {
+                                shell.publish(on_connect(OnConnectEvent::<Attachment> {
+                                    a: *a,
+                                    a_attachment: a_attachment.clone(),
+                                    b,
+                                    b_attachment,
+                                }));
+                            }
                         } else if matches!(new_payload, Payload::Background)
                             && let Some(on_connection_dropped) = &self.on_connection_dropped
                         {
@@ -1140,7 +1174,7 @@ where
         + iced::advanced::graphics::geometry::Renderer
         + 'a,
     Data: std::fmt::Debug,
-    Attachment: connections::Attachment + 'static,
+    Attachment: connections::Attachment + PartialEq + 'static,
 {
     fn from(value: Graph<'a, Message, Renderer, Data, Attachment>) -> Self {
         Self::new(value)

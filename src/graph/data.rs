@@ -30,13 +30,13 @@ impl<Data: std::fmt::Debug> GraphNode<Data> {
 
 pub struct GraphData<
     Data: std::fmt::Debug,
-    Attachment: connections::Attachment = RelativeAttachment,
+    Attachment: connections::Attachment + std::cmp::PartialEq = RelativeAttachment,
 > {
     pub(super) nodes: Vec<GraphNode<Data>>,
     pub(super) connections: Vec<Connection<Attachment>>,
 }
 
-impl<Data: std::fmt::Debug, Attachment: connections::Attachment> Default
+impl<Data: std::fmt::Debug, Attachment: connections::Attachment + std::cmp::PartialEq> Default
     for GraphData<Data, Attachment>
 {
     fn default() -> Self {
@@ -50,7 +50,7 @@ impl<Data: std::fmt::Debug, Attachment: connections::Attachment> Default
 impl<Data, Attachment> GraphData<Data, Attachment>
 where
     Data: std::fmt::Debug,
-    Attachment: self::Attachment,
+    Attachment: self::Attachment + std::cmp::PartialEq,
 {
     pub fn get(&self, id: usize) -> Result<&GraphNode<Data>, GraphError> {
         self.nodes.get(id).ok_or(GraphError::NodeNotFound(id))
@@ -116,16 +116,8 @@ where
             return Result::Err(GraphError::NodeNotFound(b));
         }
 
-        if a == b {
+        if a == b && a_attachment == b_attachment {
             return Ok(());
-        }
-
-        if let Some((id, _)) =
-            self.connections.iter().enumerate().find(|(_, conn)| {
-                (conn.a.0 == a && conn.b.0 == b) || (conn.a.0 == b && conn.b.0 == a)
-            })
-        {
-            self.connections.remove(id);
         }
 
         self.connections

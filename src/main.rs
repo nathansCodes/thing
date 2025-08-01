@@ -122,7 +122,9 @@ fn view(state: &State) -> Element<'_, Message> {
                     .node_attachments(RelativeAttachment::<line_styles::AxisAligned>::all_edges())
                     .on_connect(Message::NodeConnect)
                     .on_disconnect(Message::NodeDisconnect)
-                    .on_delete(Message::NodeDeleted);
+                    .on_delete(Message::NodeDeleted)
+                    .allow_self_connections(true)
+                    .allow_similar_connections(true);
 
                 let graph = container(graph).style(|theme: &Theme| {
                     container::Style::default()
