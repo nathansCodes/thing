@@ -10,11 +10,9 @@ use iced::{
     Length::Fill,
     Padding, Point, Task, Theme,
     font::Weight,
-    widget::{
-        button, column, container, image, opaque, pane_grid, pane_grid::Configuration, pick_list,
-        row, text,
-    },
+    widget::{button, column, container, image, opaque, pane_grid, pane_grid::Configuration, text},
 };
+use iced_aw::{menu, menu::Item, menu_bar};
 use std::path::PathBuf;
 
 use crate::{
@@ -52,7 +50,7 @@ struct Image {
 
 struct State {
     folder: Option<PathBuf>,
-    images: GraphData<Image, RelativeAttachment<line_styles::Bezier>>,
+    images: GraphData<Image, RelativeAttachment<line_styles::AxisAligned>>,
     panes: pane_grid::State<Pane>,
     assets: assets::AssetsPane,
     focus: Option<pane_grid::Pane>,
@@ -68,39 +66,30 @@ enum Pane {
 #[derive(Debug, Clone)]
 pub enum Message {
     AddImage(PathBuf),
+    MenuButtonPressed,
+    OpenAddImageDialog,
+    OpenLoadFolderDialog,
     PaneClicked(pane_grid::Pane),
     PaneDragged(pane_grid::DragEvent),
     PaneResized(pane_grid::ResizeEvent),
-    MenuItemPressed(MenuItem),
     AssetsMessage(AssetsMessage),
     FolderOpenFailed(IOError),
     AddImageFailed(IOError),
     NodeDragged(NodeDraggedEvent),
-    NodeConnect(OnConnectEvent<RelativeAttachment<line_styles::Bezier>>),
+    NodeConnect(OnConnectEvent<RelativeAttachment<line_styles::AxisAligned>>),
     NodeDisconnect(usize),
     NodeDeleted(usize),
     ImageButtonPressed,
 }
 
 fn view(state: &State) -> Element<'_, Message> {
-    let file_menu_items = [MenuItem::OpenFolder, MenuItem::AddImage];
-
-    // what a hack lmao
-    let a: Option<MenuItem> = None;
-
-    let file_menu = pick_list(file_menu_items, a, Message::MenuItemPressed)
-        .placeholder("File")
-        .style(|theme, status| {
-            let mut style = pick_list::default(theme, status);
-            style.border = Border::default();
-            let palette = theme.extended_palette();
-            style.placeholder_color = palette.background.weak.text;
-            style
-        });
-
-    let menu_bar = container(row![file_menu].spacing(5.0))
-        .width(Fill)
-        .style(style::menu_bar);
+    #[rustfmt::skip]
+    let menu_bar = menu_bar![
+        (menu_button("File"), menu!(
+            (menu_item_button("Open Folder").on_press(Message::OpenLoadFolderDialog))
+            (menu_item_button("Add Image").on_press(Message::OpenAddImageDialog))
+        ).width(200.0).spacing(2.0))
+    ].width(Fill).style(style::menu_bar).padding([2.5, 5.0]).spacing(5.0);
 
     let grid = pane_grid(&state.panes, |id, pane, _| {
         let is_focused = state.focus == Some(id);
@@ -130,7 +119,7 @@ fn view(state: &State) -> Element<'_, Message> {
             Pane::Graph => {
                 let graph = Graph::new(&state.images, view_image)
                     .on_node_dragged(Message::NodeDragged)
-                    .node_attachments(RelativeAttachment::<line_styles::Bezier>::all_edges())
+                    .node_attachments(RelativeAttachment::<line_styles::AxisAligned>::all_edges())
                     .on_connect(Message::NodeConnect)
                     .on_disconnect(Message::NodeDisconnect)
                     .on_delete(Message::NodeDeleted);
@@ -206,13 +195,11 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::PaneDragged(_) => Task::none(),
-        Message::MenuItemPressed(MenuItem::AddImage) => {
-            Task::perform(pick_file(), |path_maybe| match path_maybe {
-                Ok(path) => Message::AddImage(path),
-                Err(err) => Message::AddImageFailed(err),
-            })
-        }
-        Message::MenuItemPressed(MenuItem::OpenFolder) => {
+        Message::OpenAddImageDialog => Task::perform(pick_file(), |path_maybe| match path_maybe {
+            Ok(path) => Message::AddImage(path),
+            Err(err) => Message::AddImageFailed(err),
+        }),
+        Message::OpenLoadFolderDialog => {
             Task::perform(pick_folder(), |path_maybe| match path_maybe {
                 Ok(path) => Message::AssetsMessage(AssetsMessage::LoadAssets(path)),
                 Err(err) => Message::FolderOpenFailed(err),
@@ -259,6 +246,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             println!("pressd");
             Task::none()
         }
+        Message::MenuButtonPressed => Task::none(),
     }
 }
 
@@ -274,7 +262,7 @@ fn view_image(img: &Image) -> Element<'_, Message> {
                     text(img.path.file_name().unwrap().to_str().unwrap().to_owned())
                         .center()
                         .width(Fill),
-                    button("ahkdlfjs").on_press(Message::ImageButtonPressed)
+                    base_button("ahkdlfjs").on_press(Message::ImageButtonPressed)
                 ]
                 .width(Fill)
                 .spacing(5.0)
@@ -291,7 +279,7 @@ fn view_image(img: &Image) -> Element<'_, Message> {
             .background(palette.background.base.color)
             .border(
                 Border::default()
-                    .rounded(5.0)
+                    .rounded(15.0)
                     .width(2.0)
                     .color(palette.background.weak.color),
             )
@@ -299,17 +287,24 @@ fn view_image(img: &Image) -> Element<'_, Message> {
     .into()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MenuItem {
-    OpenFolder,
-    AddImage,
+fn base_button<'a>(content: impl Into<Element<'a, Message>>) -> button::Button<'a, Message> {
+    button(content).padding([4, 8]).style(style::base_button)
 }
 
-impl std::fmt::Display for MenuItem {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            MenuItem::AddImage => "Add Image",
-            MenuItem::OpenFolder => "Open Folder",
-        })
-    }
+fn menu_button(label: &str) -> button::Button<'_, Message> {
+    let mut font = Font::DEFAULT;
+    font.weight = Weight::Medium;
+
+    base_button(text(label).align_y(Alignment::Center).size(15.0).font(font))
+        .on_press(Message::MenuButtonPressed)
+        .style(style::menu_item)
+}
+
+fn menu_item_button(label: &str) -> button::Button<'_, Message> {
+    let mut font = Font::DEFAULT;
+    font.weight = Weight::Medium;
+
+    base_button(text(label).align_y(Alignment::Center).size(15.0).font(font))
+        .width(Fill)
+        .style(style::menu_item)
 }
