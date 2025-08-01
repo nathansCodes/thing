@@ -1,11 +1,20 @@
 use std::collections::VecDeque;
 
 use iced::Point;
+use serde::{Deserialize, Serialize};
 
 use crate::graph::connections::{self, Attachment, Connection, RelativeAttachment};
 
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "Point")]
+struct Position {
+    x: f32,
+    y: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphNode<D: std::fmt::Debug> {
+    #[serde(with = "Position")]
     pub(super) position: Point,
     pub(super) data: D,
 }
@@ -28,10 +37,12 @@ impl<Data: std::fmt::Debug> GraphNode<Data> {
     }
 }
 
-pub struct GraphData<
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GraphData<Data, Attachment = RelativeAttachment>
+where
     Data: std::fmt::Debug,
-    Attachment: connections::Attachment + std::cmp::PartialEq = RelativeAttachment,
-> {
+    Attachment: connections::Attachment + std::cmp::PartialEq,
+{
     pub(super) nodes: Vec<GraphNode<Data>>,
     pub(super) connections: Vec<Connection<Attachment>>,
 }
