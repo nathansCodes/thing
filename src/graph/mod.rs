@@ -8,8 +8,8 @@ use crate::graph::state::{CursorState, GraphState, Payload};
 pub use data::GraphData;
 
 use iced::{
-    Border, Color, Element, Event, Length, Padding, Point, Rectangle, Size, Theme, Transformation,
-    Vector,
+    Border, Color, Element, Event, Gradient, Length, Padding, Point, Rectangle, Size, Theme,
+    Transformation, Vector,
     advanced::{
         Clipboard, Layout, Shell, Widget,
         graphics::{core::event::Status, geometry::Frame},
@@ -17,6 +17,7 @@ use iced::{
         renderer::{self, Quad},
         widget::{Tree, tree},
     },
+    gradient::{ColorStop, Linear},
     keyboard::{self, Key, Modifiers, key::Named},
     mouse::{self, Button, Cursor, ScrollDelta},
     widget::canvas::{LineCap, LineJoin, Path, Stroke},
@@ -576,6 +577,69 @@ where
                     }
                 });
             });
+
+        renderer.with_layer(layout.bounds(), |renderer| {
+            renderer.fill_quad(
+                Quad {
+                    bounds: layout.bounds(),
+                    ..Default::default()
+                },
+                Gradient::Linear(
+                    Linear::new(std::f32::consts::PI / 2.0).add_stops([
+                        ColorStop {
+                            offset: 0.0,
+                            color: palette
+                                .background
+                                .base
+                                .color
+                                .scale_alpha(state.position.x.max(-10.0) / -10.0),
+                        },
+                        ColorStop {
+                            offset: 10.0 / layout.bounds().width,
+                            color: palette.background.base.color.scale_alpha(0.0),
+                        },
+                        ColorStop {
+                            offset: 1.0 - 10.0 / layout.bounds().width,
+                            color: palette.background.base.color.scale_alpha(0.0),
+                        },
+                        ColorStop {
+                            offset: 1.0,
+                            color: palette.background.base.color,
+                        },
+                    ]),
+                ),
+            );
+            renderer.fill_quad(
+                Quad {
+                    bounds: layout.bounds(),
+                    ..Default::default()
+                },
+                Gradient::Linear(
+                    Linear::new(0.0).add_stops([
+                        ColorStop {
+                            offset: 0.0,
+                            color: palette.background.base.color,
+                        },
+                        ColorStop {
+                            offset: 10.0 / layout.bounds().width,
+                            color: palette.background.base.color.scale_alpha(0.0),
+                        },
+                        ColorStop {
+                            offset: 1.0 - 10.0 / layout.bounds().width,
+                            color: palette.background.base.color.scale_alpha(0.0),
+                        },
+                        ColorStop {
+                            offset: 1.0,
+                            color: palette
+                                .background
+                                .base
+                                .color
+                                .scale_alpha(state.position.y.max(-10.0) / -10.0),
+                        },
+                    ]),
+                ),
+            );
+        });
 
         if let CursorState::Dragging(Payload::SelectionRect) = &state.cursor_state {
             renderer.with_layer(layout.bounds(), |renderer| {
