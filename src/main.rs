@@ -1,6 +1,6 @@
 mod assets;
-mod file_picker;
 mod graph;
+mod io;
 mod style;
 
 use crate::graph::{OnConnectEvent, RelativeAttachment, line_styles};
@@ -13,12 +13,13 @@ use iced::{
     widget::{button, column, container, image, opaque, pane_grid, pane_grid::Configuration, text},
 };
 use iced_aw::{menu, menu::Item, menu_bar};
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use crate::{
     assets::{AssetType, AssetsMessage, AssetsPane},
-    file_picker::{IOError, pick_file, pick_folder},
     graph::{Graph, GraphData, NodeDraggedEvent},
+    io::{IOError, pick_file, pick_folder},
 };
 
 fn main() -> iced::Result {
@@ -43,7 +44,7 @@ fn main() -> iced::Result {
         })
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct Image {
     path: PathBuf,
 }
@@ -69,6 +70,7 @@ pub enum Message {
     MenuButtonPressed,
     OpenAddImageDialog,
     OpenLoadFolderDialog,
+    Save,
     PaneClicked(pane_grid::Pane),
     PaneDragged(pane_grid::DragEvent),
     PaneResized(pane_grid::ResizeEvent),
@@ -80,6 +82,11 @@ pub enum Message {
     NodeDisconnect(usize),
     NodeDeleted(usize),
     ImageButtonPressed,
+    Saved,
+    SaveFailed(std::io::ErrorKind),
+    DataLoaded(String),
+    LoadData(PathBuf),
+    LoadDataFailed(IOError),
 }
 
 fn view(state: &State) -> Element<'_, Message> {
@@ -88,6 +95,7 @@ fn view(state: &State) -> Element<'_, Message> {
         (menu_button("File"), menu!(
             (menu_item_button("Open Folder").on_press(Message::OpenLoadFolderDialog))
             (menu_item_button("Add Image").on_press(Message::OpenAddImageDialog))
+            (menu_item_button("Save").on_press(Message::Save))
         ).width(200.0).spacing(2.0))
     ].width(Fill).style(style::menu_bar).padding([2.5, 5.0]).spacing(5.0);
 
@@ -203,7 +211,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }),
         Message::OpenLoadFolderDialog => {
             Task::perform(pick_folder(), |path_maybe| match path_maybe {
-                Ok(path) => Message::AssetsMessage(AssetsMessage::LoadAssets(path)),
+                Ok(path) => Message::LoadData(path),
                 Err(err) => Message::FolderOpenFailed(err),
             })
         }
@@ -220,6 +228,30 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 assets::update(&mut state.assets, assets_message).map(Message::AssetsMessage)
             }
         },
+        Message::LoadData(path) => Task::batch([
+            Task::done(Message::AssetsMessage(AssetsMessage::LoadAssets(
+                path.clone(),
+            ))),
+            Task::perform(io::load(path), |res| match res {
+                Ok(raw_data) => Message::DataLoaded(raw_data),
+                Err(err) => Message::LoadDataFailed(err),
+            }),
+        ]),
+        Message::LoadDataFailed(err) => {
+            println!("{err:?}");
+            Task::none()
+        }
+        Message::DataLoaded(raw_data) => {
+            let data = toml::from_str(&raw_data).map_err(IOError::from);
+
+            match data {
+                Ok(data) => {
+                    state.images = data;
+                    Task::none()
+                }
+                Err(err) => Task::done(Message::LoadDataFailed(err)),
+            }
+        }
         Message::FolderOpenFailed(_err) => Task::none(),
         Message::NodeDragged(event) => {
             if let Ok(img) = state.images.get_mut(event.id) {
@@ -249,6 +281,26 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::MenuButtonPressed => Task::none(),
+        Message::Save => {
+            let parsed = toml::to_string(&state.images).unwrap();
+
+            if let Some(folder) = &state.folder {
+                Task::perform(
+                    io::save(folder.clone().join("data.toml"), parsed),
+                    |res| match res {
+                        Ok(()) => Message::Saved,
+                        Err(err) => Message::SaveFailed(err.kind()),
+                    },
+                )
+            } else {
+                Task::none()
+            }
+        }
+        Message::Saved => Task::none(),
+        Message::SaveFailed(err) => {
+            println!("{err}");
+            Task::none()
+        }
     }
 }
 
