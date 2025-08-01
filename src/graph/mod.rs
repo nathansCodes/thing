@@ -1167,9 +1167,16 @@ where
             Event::Keyboard(keyboard::Event::KeyReleased {
                 key: Key::Character(char),
                 location: _,
-                modifiers: _,
+                modifiers,
             }) => {
-                if char.eq("d") {
+                if modifiers.control() && char == "a" {
+                    state.selection.clear();
+
+                    state.selection.extend(0..self.data.nodes.len());
+
+                    status = Status::Captured;
+                }
+                if char == "d" {
                     state.debug = !state.debug;
                     status = Status::Captured;
                 }
