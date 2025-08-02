@@ -1168,10 +1168,10 @@ where
 
                 status = Status::Captured;
             }
-            Event::Keyboard(keyboard::Event::KeyReleased {
+            Event::Keyboard(keyboard::Event::KeyPressed {
                 key: Key::Character(char),
-                location: _,
                 modifiers,
+                ..
             }) => {
                 if modifiers.control() && char == "a" {
                     state.selection.clear();
