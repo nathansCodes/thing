@@ -1121,44 +1121,42 @@ where
                 ..
             }) => {
                 if let Some(on_delete) = &self.on_delete {
-                    for (i, selected_node) in state.selection.iter().enumerate() {
-                        let mut selection = *selected_node;
-
+                    for (selection_index, selected_node_id) in state.selection.iter().enumerate() {
                         // find how many of the previous selections have an id less than the
                         // current one and subtract the current one from that. we don't want an
                         // an out of bounds memory access
                         let correction = state
                             .selection
                             .iter()
-                            .take(i)
-                            .filter(|s| **s < selection)
+                            .take(selection_index)
+                            .filter(|s| *s < selected_node_id)
                             .count();
 
-                        selection -= correction.min(i);
+                        let corrected_node_id = *selected_node_id - correction.min(selection_index);
 
+                        // disconnect
                         if let Some(on_disconnect) = &self.on_disconnect {
-                            for (i, _) in self.data.get_connections(selection) {
+                            for (i, _) in self.data.get_connections(corrected_node_id) {
                                 on_disconnect(i);
                             }
                         }
 
-                        if let Payload::Node(id, _) = new_payload
-                            && id == selection
-                        {
-                            state.cursor_state = CursorState::Hovering(Payload::Background);
-                        } else if let Payload::Connection(id) = new_payload {
-                            if self.data.connections[id].a.0 == selection
-                                || self.data.connections[id].b.0 == selection
+                        match new_payload {
+                            Payload::Node(id, _) | Payload::Attachment(id, _)
+                                if id == *selected_node_id =>
+                            {
+                                state.cursor_state = CursorState::Hovering(Payload::Background)
+                            }
+                            Payload::Connection(id)
+                                if self.data.connections[id].a.0 == *selected_node_id
+                                    || self.data.connections[id].b.0 == *selected_node_id =>
                             {
                                 state.cursor_state = CursorState::Hovering(Payload::Background);
                             }
-                        } else if let Payload::Attachment(id, _) = new_payload
-                            && id == selection
-                        {
-                            state.cursor_state = CursorState::Hovering(Payload::Background);
+                            _ => (),
                         }
 
-                        shell.publish(on_delete(selection));
+                        shell.publish(on_delete(corrected_node_id));
                     }
 
                     state.selection.clear();
