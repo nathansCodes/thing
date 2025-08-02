@@ -98,9 +98,9 @@ fn view(state: &State) -> Element<'_, Message> {
     #[rustfmt::skip]
     let menu_bar = menu_bar![
         (menu_button("File"), menu!(
-            (menu_item_button("Open Folder").on_press(Message::OpenLoadFolderDialog))
-            (menu_item_button("Add Image").on_press(Message::OpenAddImageDialog))
-            (menu_item_button("Save").on_press(Message::Save))
+            (menu_item_button("Open Folder", Some("CTRL+O")).on_press(Message::OpenLoadFolderDialog))
+            (menu_item_button("Add Image", None).on_press(Message::OpenAddImageDialog))
+            (menu_item_button("Save", Some("CTRL+S")).on_press(Message::Save))
         ).width(200.0).spacing(2.0))
     ].width(Fill).style(style::menu_bar).padding([2.5, 5.0]).spacing(5.0);
 
@@ -310,8 +310,11 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
 }
 
 fn subscription(_state: &State) -> Subscription<Message> {
-    keyboard::on_key_press(|key, modifiers| match (key, modifiers) {
-        (Key::Character(char), Modifiers::CTRL) if char.eq("s") => Some(Message::Save),
+    keyboard::on_key_press(|key, modifiers| match (modifiers, key) {
+        (Modifiers::CTRL, Key::Character(char)) if char.eq("s") => Some(Message::Save),
+        (Modifiers::CTRL, Key::Character(char)) if char.eq("o") => {
+            Some(Message::OpenLoadFolderDialog)
+        }
         _ => None,
     })
 }
