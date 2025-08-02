@@ -1121,8 +1121,8 @@ where
                 ..
             }) => {
                 if let Some(on_delete) = &self.on_delete {
-                    for (i, selection) in state.selection.iter().enumerate() {
-                        let mut selection = *selection;
+                    for (i, selected_node) in state.selection.iter().enumerate() {
+                        let mut selection = *selected_node;
 
                         // find how many of the previous selections have an id less than the
                         // current one and subtract the current one from that. we don't want an
@@ -1135,6 +1135,12 @@ where
                             .count();
 
                         selection -= correction.min(i);
+
+                        if let Some(on_disconnect) = &self.on_disconnect {
+                            for (i, _) in self.data.get_connections(selection) {
+                                on_disconnect(i);
+                            }
+                        }
 
                         if let Payload::Node(id, _) = new_payload
                             && id == selection

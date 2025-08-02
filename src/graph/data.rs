@@ -97,7 +97,7 @@ where
         )
     }
 
-    pub fn get_connections(&self, id: usize) -> Vec<&GraphNode<Data>> {
+    pub fn get_connected_nodes(&self, id: usize) -> Vec<&GraphNode<Data>> {
         self.connections
             .iter()
             .filter_map(|Connection { a, b, .. }| {
@@ -109,6 +109,14 @@ where
                     None
                 }
             })
+            .collect()
+    }
+
+    pub(super) fn get_connections(&self, id: usize) -> Vec<(usize, &Connection<Attachment>)> {
+        self.connections
+            .iter()
+            .enumerate()
+            .filter(|(_, conn)| conn.a.0 == id || conn.b.0 == id)
             .collect()
     }
 
