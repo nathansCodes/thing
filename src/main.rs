@@ -2,16 +2,20 @@ mod assets;
 mod graph;
 mod io;
 mod style;
+mod widgets;
 
 use crate::graph::{OnConnectEvent, RelativeAttachment, line_styles};
+use crate::widgets::*;
 
+use iced::keyboard::{Key, Modifiers};
 use iced::{
     Alignment, Border, Element, Font,
     Length::Fill,
     Padding, Point, Task, Theme,
     font::Weight,
-    widget::{button, column, container, image, opaque, pane_grid, pane_grid::Configuration, text},
+    widget::{column, container, image, opaque, pane_grid, pane_grid::Configuration, text},
 };
+use iced::{Subscription, keyboard};
 use iced_aw::{menu, menu::Item, menu_bar};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -24,6 +28,7 @@ use crate::{
 
 fn main() -> iced::Result {
     iced::application("Hello", update, view)
+        .subscription(subscription)
         .theme(|_| Theme::TokyoNight)
         .run_with(|| {
             (
@@ -304,6 +309,13 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
     }
 }
 
+fn subscription(_state: &State) -> Subscription<Message> {
+    keyboard::on_key_press(|key, modifiers| match (key, modifiers) {
+        (Key::Character(char), Modifiers::CTRL) if char.eq("s") => Some(Message::Save),
+        _ => None,
+    })
+}
+
 fn view_image(img: &Image) -> Element<'_, Message> {
     container(
         column![
@@ -339,26 +351,4 @@ fn view_image(img: &Image) -> Element<'_, Message> {
             )
     })
     .into()
-}
-
-fn base_button<'a>(content: impl Into<Element<'a, Message>>) -> button::Button<'a, Message> {
-    button(content).padding([4, 8]).style(style::base_button)
-}
-
-fn menu_button(label: &str) -> button::Button<'_, Message> {
-    let mut font = Font::DEFAULT;
-    font.weight = Weight::Medium;
-
-    base_button(text(label).align_y(Alignment::Center).size(15.0).font(font))
-        .on_press(Message::MenuButtonPressed)
-        .style(style::menu_item)
-}
-
-fn menu_item_button(label: &str) -> button::Button<'_, Message> {
-    let mut font = Font::DEFAULT;
-    font.weight = Weight::Medium;
-
-    base_button(text(label).align_y(Alignment::Center).size(15.0).font(font))
-        .width(Fill)
-        .style(style::menu_item)
 }
