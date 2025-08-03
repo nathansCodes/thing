@@ -1,11 +1,15 @@
 use iced::{
     Alignment, Element, Font,
     Length::Fill,
+    Padding, Theme,
+    border::Radius,
     font::Weight,
-    widget::{button, container, horizontal_space, row, text},
+    widget::{
+        Container, button, column, container, horizontal_rule, horizontal_space, row, rule, text,
+    },
 };
 
-use crate::{Message, style};
+use crate::{Message, notification::Notification, style};
 
 pub fn base_button<'a>(content: impl Into<Element<'a, Message>>) -> button::Button<'a, Message> {
     button(content).padding([4, 8]).style(style::base_button)
@@ -45,4 +49,52 @@ pub fn menu_item_button<'a>(
     )
     .width(Fill)
     .style(style::menu_item)
+}
+
+pub fn notification(i: usize, notification: &Notification) -> Container<Message> {
+    let mut title_font = Font::DEFAULT;
+
+    title_font.weight = Weight::Bold;
+
+    let mut x_font = Font::DEFAULT;
+
+    x_font.weight = Weight::Black;
+
+    let header = container(
+        row![
+            text(&notification.title)
+                .font(title_font)
+                .align_y(Alignment::Center),
+            horizontal_space(),
+            // TODO: find icons to use
+            base_button(
+                text("X")
+                    .align_y(Alignment::Center)
+                    .align_x(Alignment::Center)
+                    .font(x_font)
+                    .size(14.0)
+            )
+            .style(style::notification_close_button(&notification.severity))
+            .width(25.0)
+            .height(25.0)
+            .on_press(Message::DismissNotification(i))
+        ]
+        .align_y(Alignment::Center),
+    )
+    .padding(Padding::default().left(8.0).right(2.0).top(2.0).bottom(2.0))
+    .style(style::notification_title(&notification.severity));
+
+    container(column![
+        header,
+        container(
+            horizontal_rule(2.0).style(style::notification_timeout_indicator(
+                &notification.severity,
+                notification.timeout
+            ))
+        )
+        .padding([0.0, 2.0]),
+        container(text(&notification.content).size(14.0)).padding(4.0)
+    ])
+    .width(250.0)
+    .style(style::notification(&notification.severity))
 }

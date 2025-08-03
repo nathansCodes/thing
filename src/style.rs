@@ -1,7 +1,9 @@
 use iced::border::Radius;
-use iced::widget::{button, container};
+use iced::widget::{button, container, rule};
 use iced::{Border, Color, Shadow, Theme, Vector};
 use iced_aw::style::menu_bar;
+
+use crate::notification::{self, Severity};
 
 pub fn base_button(theme: &Theme, status: button::Status) -> button::Style {
     let palette = theme.extended_palette();
@@ -166,4 +168,129 @@ pub fn graph_overlay(theme: &Theme) -> container::Style {
         },
         ..Default::default()
     }
+}
+
+pub fn notification<'a>(severity: &'a Severity) -> container::StyleFn<'a, Theme> {
+    Box::new(move |theme: &Theme| {
+        let palette = theme.extended_palette();
+
+        match severity {
+            notification::Severity::Info => container::Style {
+                text_color: Some(palette.primary.base.color),
+                background: Some(palette.primary.base.color.scale_alpha(0.5).into()),
+                shadow: Shadow {
+                    color: Color::BLACK,
+                    offset: Vector::ZERO,
+                    blur_radius: 10.0,
+                },
+                border: Border::default()
+                    .color(palette.primary.base.color)
+                    .width(2.0)
+                    .rounded(10.0),
+            },
+            notification::Severity::Destructive => container::Style {
+                text_color: Some(palette.danger.base.color),
+                background: Some(palette.danger.base.color.scale_alpha(0.5).into()),
+                shadow: Shadow {
+                    color: Color::BLACK,
+                    offset: Vector::ZERO,
+                    blur_radius: 10.0,
+                },
+                border: Border::default()
+                    .color(palette.danger.base.color)
+                    .width(2.0)
+                    .rounded(10.0),
+            },
+            notification::Severity::Error => container::Style {
+                text_color: Some(palette.danger.base.color),
+                background: Some(palette.danger.base.color.scale_alpha(0.5).into()),
+                shadow: Shadow {
+                    color: Color::BLACK,
+                    offset: Vector::ZERO,
+                    blur_radius: 10.0,
+                },
+                border: Border::default()
+                    .color(palette.danger.base.color)
+                    .width(2.0)
+                    .rounded(10.0),
+            },
+        }
+    })
+}
+
+pub fn notification_title<'a>(severity: &'a Severity) -> container::StyleFn<'a, Theme> {
+    Box::new(move |theme: &Theme| {
+        let palette = theme.extended_palette();
+
+        match severity {
+            notification::Severity::Info => container::Style {
+                text_color: Some(palette.background.base.color),
+                background: Some(palette.primary.base.color.into()),
+                border: Border::default().rounded(Radius::default().top(10.0)),
+                ..Default::default()
+            },
+            notification::Severity::Destructive => container::Style {
+                text_color: Some(palette.background.base.color),
+                background: Some(palette.danger.base.color.into()),
+                border: Border::default().rounded(Radius::default().top(10.0)),
+                ..Default::default()
+            },
+            notification::Severity::Error => container::Style {
+                text_color: Some(palette.background.base.color),
+                background: Some(palette.danger.base.color.into()),
+                border: Border::default().rounded(Radius::default().top(10.0)),
+                ..Default::default()
+            },
+        }
+    })
+}
+
+pub fn notification_close_button<'a>(severity: &'a Severity) -> button::StyleFn<'a, Theme> {
+    Box::new(move |theme: &Theme, status: button::Status| {
+        let palette = theme.extended_palette();
+
+        let base_color = match severity {
+            notification::Severity::Info => palette.primary.base.color,
+            notification::Severity::Destructive => palette.danger.base.color,
+            notification::Severity::Error => palette.danger.base.color,
+        };
+
+        match status {
+            button::Status::Active | button::Status::Pressed => button::Style {
+                text_color: palette.background.base.color,
+                background: Some(base_color.into()),
+                border: Border::default().rounded(100.0),
+                ..Default::default()
+            },
+            button::Status::Hovered => button::Style {
+                text_color: base_color,
+                background: Some(palette.background.base.color.into()),
+                border: Border::default().rounded(100.0),
+                ..Default::default()
+            },
+            button::Status::Disabled => unimplemented!(),
+        }
+    })
+}
+
+pub fn notification_timeout_indicator<'a>(
+    severity: &'a Severity,
+    timeout: f32,
+) -> rule::StyleFn<'a, Theme> {
+    Box::new(move |theme: &Theme| {
+        let palette = theme.extended_palette();
+
+        let color = match severity {
+            notification::Severity::Info => palette.primary.base.color,
+            notification::Severity::Destructive => palette.danger.base.color,
+            notification::Severity::Error => palette.danger.base.color,
+        };
+
+        rule::Style {
+            color,
+            width: 2,
+            radius: Radius::new(1.0),
+            fill_mode: rule::FillMode::Percent(timeout / 5.0 * 100.0),
+        }
+    })
 }
