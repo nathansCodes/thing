@@ -34,14 +34,8 @@ pub async fn save(path: PathBuf, data: String) -> Result<(), std::io::Error> {
     Ok(())
 }
 
-pub async fn load(mut path: PathBuf) -> Result<String, IOError> {
-    path.push("data.toml");
-
-    let mut file = if std::fs::exists(path.clone())? {
-        std::fs::File::open(path.clone())?
-    } else {
-        std::fs::File::create(path)?
-    };
+pub async fn load(path: PathBuf) -> Result<String, IOError> {
+    let mut file = std::fs::File::open(path.join("data.toml"))?;
 
     let mut data = String::new();
 

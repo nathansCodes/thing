@@ -39,6 +39,7 @@ pub fn update(state: &mut AssetsPane, message: AssetsMessage) -> Task<AssetsMess
             let create_dir = async |path| -> io::Result<()> { std::fs::create_dir(path) };
 
             if !path.exists() {
+                println!("/images subdirectory not found");
                 Task::perform(create_dir(path.clone()), move |result| match result {
                     Ok(_) => {
                         let mut path = path.clone();

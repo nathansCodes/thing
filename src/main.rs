@@ -1,13 +1,16 @@
 mod assets;
 mod graph;
 mod io;
+mod notification;
 mod style;
 mod widgets;
 
 use crate::graph::{OnConnectEvent, RelativeAttachment, line_styles};
+use crate::notification::Notification;
 use crate::widgets::*;
 
 use iced::keyboard::{Key, Modifiers};
+use iced::widget::{horizontal_space, row, scrollable, stack};
 use iced::{
     Alignment, Border, Element, Font,
     Length::Fill,
@@ -18,7 +21,9 @@ use iced::{
 use iced::{Subscription, keyboard};
 use iced_aw::{menu, menu::Item, menu_bar};
 use serde::{Deserialize, Serialize};
+use std::io::ErrorKind;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::{
     assets::{AssetType, AssetsMessage, AssetsPane},
@@ -43,6 +48,7 @@ fn main() -> iced::Result {
                     }),
                     focus: None,
                     assets: AssetsPane::default(),
+                    notifications: Vec::new(),
                 },
                 Task::none(),
             )
@@ -60,6 +66,7 @@ struct State {
     panes: pane_grid::State<Pane>,
     assets: assets::AssetsPane,
     focus: Option<pane_grid::Pane>,
+    notifications: Vec<Notification>,
 }
 
 #[derive(Default)]
@@ -80,8 +87,6 @@ pub enum Message {
     PaneDragged(pane_grid::DragEvent),
     PaneResized(pane_grid::ResizeEvent),
     AssetsMessage(AssetsMessage),
-    FolderOpenFailed(IOError),
-    AddImageFailed(IOError),
     NodeDragged(NodeDraggedEvent),
     NodeConnect(OnConnectEvent<RelativeAttachment<line_styles::AxisAligned>>),
     NodeDisconnect(usize),
@@ -92,6 +97,11 @@ pub enum Message {
     DataLoaded(String),
     LoadData(PathBuf),
     LoadDataFailed(IOError),
+    OpenFolderFailed(IOError),
+    AddImageFailed(IOError),
+    DismissNotification(usize),
+    DataNotLoaded,
+    Tick,
 }
 
 fn view(state: &State) -> Element<'_, Message> {
@@ -178,7 +188,25 @@ fn view(state: &State) -> Element<'_, Message> {
     .on_drag(Message::PaneDragged)
     .on_resize(10, Message::PaneResized);
 
-    column![menu_bar, container(grid)].into()
+    let notifications = row![
+        horizontal_space(),
+        opaque(
+            scrollable(
+                column(
+                    state
+                        .notifications
+                        .iter()
+                        .enumerate()
+                        .map(|(i, notification)| widgets::notification(i, notification).into())
+                )
+                .spacing(10.0)
+                .padding(5.0)
+            )
+            .height(500.0)
+        )
+    ];
+
+    column![menu_bar, stack![container(grid), notifications]].into()
 }
 
 fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -196,7 +224,14 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 Task::none()
             }
         }
-        Message::AddImageFailed(_) => Task::none(),
+        Message::AddImageFailed(err) => {
+            state.notifications.push(Notification::error(
+                "Failed to add image",
+                format!("Failed to add image: {err:?}",),
+            ));
+
+            Task::none()
+        }
         Message::PaneClicked(pane) => {
             state.focus = Some(pane);
             Task::none()
@@ -216,8 +251,12 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }),
         Message::OpenLoadFolderDialog => {
             Task::perform(pick_folder(), |path_maybe| match path_maybe {
-                Ok(path) => Message::LoadData(path),
-                Err(err) => Message::FolderOpenFailed(err),
+                Ok(path) if path.exists() && path.is_dir() => Message::LoadData(path),
+                Ok(path) if path.is_file() => {
+                    Message::OpenFolderFailed(IOError::IO(std::io::ErrorKind::NotADirectory))
+                }
+                Ok(_) => Message::OpenFolderFailed(IOError::IO(std::io::ErrorKind::NotFound)),
+                Err(err) => Message::OpenFolderFailed(err),
             })
         }
         Message::AssetsMessage(assets_message) => match assets_message {
@@ -239,13 +278,18 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             ))),
             Task::perform(io::load(path), |res| match res {
                 Ok(raw_data) => Message::DataLoaded(raw_data),
+                Err(IOError::IO(ErrorKind::NotFound)) => Message::DataNotLoaded,
                 Err(err) => Message::LoadDataFailed(err),
             }),
         ]),
         Message::LoadDataFailed(err) => {
-            println!("{err:?}");
+            state.notifications.push(Notification::error(
+                "Failed to load data",
+                format!("Failed to load data: {err:?}",),
+            ));
             Task::none()
         }
+        Message::DataNotLoaded => Task::none(),
         Message::DataLoaded(raw_data) => {
             let data = toml::from_str(&raw_data).map_err(IOError::from);
 
@@ -257,7 +301,13 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 Err(err) => Task::done(Message::LoadDataFailed(err)),
             }
         }
-        Message::FolderOpenFailed(_err) => Task::none(),
+        Message::OpenFolderFailed(err) => {
+            state.notifications.push(Notification::error(
+                "Failed to open folder",
+                format!("Failed to open folder: {err:?}",),
+            ));
+            Task::none()
+        }
         Message::NodeDragged(event) => {
             if let Ok(img) = state.images.get_mut(event.id) {
                 img.move_to(event.new_position);
@@ -301,22 +351,56 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 Task::none()
             }
         }
-        Message::Saved => Task::none(),
+        Message::Saved => {
+            state.notifications.push(Notification::info(
+                "Saved successfully!",
+                format!(
+                    "successfully saved to {}",
+                    state.folder.as_ref().unwrap().to_string_lossy()
+                ),
+            ));
+            Task::none()
+        }
         Message::SaveFailed(err) => {
-            println!("{err}");
+            state.notifications.push(Notification::error(
+                "Failed to save data",
+                format!(
+                    "Failed to save to {}: {err}",
+                    state.folder.as_ref().unwrap().to_string_lossy()
+                ),
+            ));
+            Task::none()
+        }
+        Message::DismissNotification(i) => {
+            state.notifications.remove(i);
+
+            Task::none()
+        }
+        Message::Tick => {
+            if let Some(first_notification) = state.notifications.get_mut(0) {
+                first_notification.timeout -= 0.02;
+
+                if first_notification.timeout <= 0.0 {
+                    state.notifications.remove(0);
+                }
+            }
+
             Task::none()
         }
     }
 }
 
 fn subscription(_state: &State) -> Subscription<Message> {
-    keyboard::on_key_press(|key, modifiers| match (modifiers, key) {
-        (Modifiers::CTRL, Key::Character(char)) if char.eq("s") => Some(Message::Save),
-        (Modifiers::CTRL, Key::Character(char)) if char.eq("o") => {
-            Some(Message::OpenLoadFolderDialog)
-        }
-        _ => None,
-    })
+    Subscription::batch([
+        keyboard::on_key_press(|key, modifiers| match (modifiers, key) {
+            (Modifiers::CTRL, Key::Character(char)) if char.eq("s") => Some(Message::Save),
+            (Modifiers::CTRL, Key::Character(char)) if char.eq("o") => {
+                Some(Message::OpenLoadFolderDialog)
+            }
+            _ => None,
+        }),
+        iced::time::every(Duration::from_millis(20)).map(|_| Message::Tick),
+    ])
 }
 
 fn view_image(img: &Image) -> Element<'_, Message> {
