@@ -1,10 +1,14 @@
 pub mod connections;
 mod data;
+mod iter;
 pub mod line_styles;
 mod state;
 
 pub use crate::graph::connections::{Attachment, RelativeAttachment};
-use crate::graph::state::{CursorState, GraphState, Payload};
+use crate::graph::{
+    data::GraphNode,
+    state::{CursorState, GraphState, Payload},
+};
 pub use data::GraphData;
 
 use iced::{
@@ -41,7 +45,7 @@ where
     data: &'a GraphData<Data, Attachment>,
     content: Vec<Element<'a, Message, Theme, Renderer>>,
     on_node_dragged: Option<Box<dyn Fn(NodeDraggedEvent) -> Message + 'a>>,
-    get_attachment: Box<dyn Fn(&'a Data, Vector) -> Option<Attachment> + 'a>,
+    get_attachment: Box<dyn Fn(&'a GraphNode<Data>, Vector) -> Option<Attachment> + 'a>,
     on_connect: Option<Box<dyn Fn(OnConnectEvent<Attachment>) -> Message + 'a>>,
     on_disconnect: Option<Box<dyn Fn(usize) -> Message + 'a>>,
     on_delete: Option<Box<dyn Fn(usize) -> Message + 'a>>,
@@ -80,42 +84,64 @@ where
         }
     }
 
-    pub fn node_attachments(mut self, attachments: &'a [Attachment]) -> Self {
+    pub fn node_attachments(mut self, attachments: &'a [(Attachment, Vector)]) -> Self {
         self.get_attachment = Box::new(|_data, relative_cursor_pos| {
             attachments
                 .iter()
-                .find(|att| {
+                .find_map(|(att, att_size)| {
                     let mut diff = relative_cursor_pos - att.connection_point();
 
                     diff.x = diff.x.abs();
                     diff.y = diff.y.abs();
 
-                    diff.x < 0.15 && diff.y < 0.15
+                    (diff.x < att_size.x && diff.y < att_size.y).then_some(att)
                 })
                 .cloned()
         });
         self
     }
 
-    pub fn per_node_attachments<F>(mut self, get_attachments: F) -> Self
+    pub fn per_node_attachments<F, Iter>(mut self, get_attachments: F) -> Self
     where
-        F: Fn(&'a Data) -> &'a [Attachment] + 'a,
+        F: Fn(&'a Data) -> Iter + 'a,
+        Iter: IntoIterator<Item = (Attachment, Vector)> + 'a,
     {
-        self.get_attachment = Box::new(move |data, relative_cursor_pos| {
-            get_attachments(data)
-                .iter()
-                .find(|att| {
+        self.get_attachment = Box::new(move |node, relative_cursor_pos| {
+            get_attachments(&node.data)
+                .into_iter()
+                .find_map(|(att, att_size)| {
                     let mut diff = relative_cursor_pos - att.connection_point();
 
                     diff.x = diff.x.abs();
                     diff.y = diff.y.abs();
 
-                    diff.x < 0.15 && diff.y < 0.15
+                    (diff.x < att_size.x && diff.y < att_size.y).then_some(att)
                 })
-                .cloned()
         });
         self
     }
+
+    // pub fn position_nodes<F>(mut self, f: F) -> Self
+    // where
+    //     F: Fn(Option<usize>, usize, Size, Vec<usize>, Vec<usize>) -> Vector + 'a,
+    // {
+    //     self.node_positioning = Some(Box::new(|data, layout| {
+    //         let mut visited_nodes = Vec::new();
+    //         data.traverse_mut(Some(0), |i, node| {
+    //             f(
+    //                 visited_nodes.last().cloned(),
+    //                 i,
+    //                 layout.children().nth(i).unwrap().bounds().size(),
+    //                 data.get_connections(i).iter().map(|c| c.0).collect(),
+    //                 visited_nodes.clone(),
+    //             );
+    //
+    //             visited_nodes.push(i);
+    //         });
+    //     }));
+    //
+    //     self
+    // }
 
     pub fn allow_similar_connections(mut self, value: bool) -> Self {
         self.allow_similar_connections = value;
@@ -266,7 +292,7 @@ where
             .zip(self.data.nodes.iter())
             .enumerate()
             .find_map(
-                |(i, (((element, node_layout), tree), data))| match cursor.position() {
+                |(i, (((element, node_layout), tree), node))| match cursor.position() {
                     Some(cursor_pos) => {
                         // make sure the cursor position is transformed properly
                         let cursor = match cursor {
@@ -298,7 +324,7 @@ where
                             node_layout.bounds(),
                             state.zoom,
                             state.position,
-                            data.position,
+                            node.position,
                         );
 
                         let hovered = child_bounds.contains(cursor_pos);
@@ -308,8 +334,7 @@ where
                         relative_cursor_pos.x /= child_bounds.size().width;
                         relative_cursor_pos.y /= child_bounds.size().height;
 
-                        let hovered_attachment =
-                            (self.get_attachment)(&data.data, relative_cursor_pos);
+                        let hovered_attachment = (self.get_attachment)(node, relative_cursor_pos);
 
                         if !hovered && let Some(hovered_attachment) = hovered_attachment {
                             return Some(Payload::Attachment(i, hovered_attachment));

@@ -1,12 +1,9 @@
 use iced::{
     Alignment, Element, Font,
     Length::Fill,
-    Padding, Theme,
-    border::Radius,
+    Padding,
     font::Weight,
-    widget::{
-        Container, button, column, container, horizontal_rule, horizontal_space, row, rule, text,
-    },
+    widget::{Container, button, column, container, horizontal_rule, horizontal_space, row, text},
 };
 
 use crate::{Message, notification::Notification, style};
