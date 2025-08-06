@@ -21,7 +21,13 @@ where
         Self {
             graph_data: data,
             visited: Vec::new(),
-            stack: [starting_node].into_iter().collect(),
+            stack: if data.nodes.get(starting_node).is_some() {
+                let mut stack = VecDeque::with_capacity(data.nodes.len());
+                stack.push_back(starting_node);
+                stack
+            } else {
+                VecDeque::new()
+            },
         }
     }
 }
@@ -90,7 +96,13 @@ where
         Self {
             graph_data: data,
             visited: Vec::new(),
-            queue: [starting_node].into_iter().collect(),
+            queue: if data.nodes.get(starting_node).is_some() {
+                let mut queue = VecDeque::with_capacity(data.nodes.len());
+                queue.push_back(starting_node);
+                queue
+            } else {
+                VecDeque::new()
+            },
         }
     }
 }
