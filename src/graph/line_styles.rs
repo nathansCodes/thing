@@ -43,11 +43,11 @@ impl LineStyle for AxisAligned {
                 if diff.y > diff.x && diff.y < -diff.x {
                     Edge::Left
                 } else if diff.y < diff.x && diff.y < -diff.x {
-                    Edge::Bottom
+                    Edge::Top
                 } else if diff.y < diff.x && diff.y > -diff.x {
                     Edge::Right
                 } else {
-                    Edge::Top
+                    Edge::Bottom
                 }
             }
         };
@@ -60,11 +60,11 @@ impl LineStyle for AxisAligned {
                 if diff.y > diff.x && diff.y < -diff.x {
                     Edge::Left
                 } else if diff.y < diff.x && diff.y < -diff.x {
-                    Edge::Bottom
+                    Edge::Top
                 } else if diff.y < diff.x && diff.y > -diff.x {
                     Edge::Right
                 } else {
-                    Edge::Top
+                    Edge::Bottom
                 }
             }
         };

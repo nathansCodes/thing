@@ -21,9 +21,7 @@ impl<A: Attachment> Connection<A> {
 }
 
 pub trait Attachment: std::fmt::Debug + Clone + Send {
-    fn connection_point(&self) -> Vector {
-        Vector { x: 0.5, y: 0.5 }
-    }
+    fn connection_point(&self) -> Vector;
 
     fn path(_a: Self, a_point: Point, _b: Self, b_point: Point) -> Path {
         Path::line(a_point, b_point)
@@ -61,54 +59,73 @@ impl<Style> RelativeAttachment<Style>
 where
     Style: line_styles::LineStyle + std::fmt::Debug + Clone,
 {
-    pub fn all_edges<'a>() -> &'a [Self] {
-        &[
-            Self::Edge {
-                edge: Edge::Top,
-                align: 0.5,
-                _phantom: PhantomData,
-            },
-            Self::Edge {
-                edge: Edge::Right,
-                align: 0.5,
-                _phantom: PhantomData,
-            },
-            Self::Edge {
-                edge: Edge::Bottom,
-                align: 0.5,
-                _phantom: PhantomData,
-            },
-            Self::Edge {
-                edge: Edge::Left,
-                align: 0.5,
-                _phantom: PhantomData,
-            },
+    pub fn all_edges(size: Vector) -> [(Self, Vector); 4] {
+        [
+            (
+                Self::Edge {
+                    edge: Edge::Top,
+                    align: 0.5,
+                    _phantom: PhantomData,
+                },
+                size,
+            ),
+            (
+                Self::Edge {
+                    edge: Edge::Right,
+                    align: 0.5,
+                    _phantom: PhantomData,
+                },
+                size,
+            ),
+            (
+                Self::Edge {
+                    edge: Edge::Bottom,
+                    align: 0.5,
+                    _phantom: PhantomData,
+                },
+                size,
+            ),
+            (
+                Self::Edge {
+                    edge: Edge::Left,
+                    align: 0.5,
+                    _phantom: PhantomData,
+                },
+                size,
+            ),
         ]
     }
 
-    pub fn all_corners<'a>() -> &'a [Self] {
-        &[
-            Self::Edge {
-                edge: Edge::Top,
-                align: 0.0,
-                _phantom: PhantomData,
-            },
-            Self::Edge {
-                edge: Edge::Right,
-                align: 0.0,
-                _phantom: PhantomData,
-            },
-            Self::Edge {
-                edge: Edge::Bottom,
-                align: 1.0,
-                _phantom: PhantomData,
-            },
-            Self::Edge {
-                edge: Edge::Left,
-                align: 1.0,
-                _phantom: PhantomData,
-            },
-        ]
+    pub fn top() -> Self {
+        Self::Edge {
+            edge: Edge::Top,
+            align: 0.5,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn right() -> Self {
+        Self::Edge {
+            edge: Edge::Right,
+            align: 0.5,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn bottom() -> Self {
+        Self::Edge {
+            edge: Edge::Bottom,
+            align: 0.5,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn left() -> Self {
+        Self::Edge {
+            edge: Edge::Left,
+            align: 0.5,
+            _phantom: PhantomData,
+        }
     }
 }
 
