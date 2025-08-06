@@ -5,6 +5,7 @@ mod notification;
 mod style;
 mod widgets;
 
+use crate::graph::connections::Edge;
 use crate::graph::{OnConnectEvent, RelativeAttachment, line_styles};
 use crate::notification::Notification;
 use crate::widgets::*;
@@ -18,7 +19,7 @@ use iced::{
     font::Weight,
     widget::{column, container, image, opaque, pane_grid, pane_grid::Configuration, text},
 };
-use iced::{Subscription, keyboard};
+use iced::{Subscription, Vector, keyboard};
 use iced_aw::{menu, menu::Item, menu_bar};
 use serde::{Deserialize, Serialize};
 use std::io::ErrorKind;
@@ -39,7 +40,7 @@ fn main() -> iced::Result {
             (
                 State {
                     folder: None,
-                    images: GraphData::default(),
+                    nodes: GraphData::default(),
                     panes: pane_grid::State::with_configuration(Configuration::Split {
                         axis: pane_grid::Axis::Vertical,
                         ratio: 0.25,
@@ -55,14 +56,20 @@ fn main() -> iced::Result {
         })
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct Image {
     path: PathBuf,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+enum Node {
+    Character(Image),
+    Family,
+}
+
 struct State {
     folder: Option<PathBuf>,
-    images: GraphData<Image, RelativeAttachment<line_styles::AxisAligned>>,
+    nodes: GraphData<Node, RelativeAttachment<line_styles::AxisAligned>>,
     panes: pane_grid::State<Pane>,
     assets: assets::AssetsPane,
     focus: Option<pane_grid::Pane>,
@@ -102,6 +109,7 @@ pub enum Message {
     DismissNotification(usize),
     DataNotLoaded,
     Tick,
+    TraverseGraph,
 }
 
 fn view(state: &State) -> Element<'_, Message> {
@@ -140,9 +148,23 @@ fn view(state: &State) -> Element<'_, Message> {
 
         let mut content = pane_grid::Content::new(match pane {
             Pane::Graph => {
-                let graph = Graph::new(&state.images, view_image)
+                let graph = Graph::new(&state.nodes, view_node)
                     .on_node_dragged(Message::NodeDragged)
-                    .node_attachments(RelativeAttachment::<line_styles::AxisAligned>::all_edges())
+                    .per_node_attachments(move |node| {
+                        match node {
+                            Node::Character(_) => {
+                                RelativeAttachment::<line_styles::AxisAligned>::all_edges(
+                                    Vector::new(0.15, 0.15),
+                                )
+                                .to_vec()
+                            }
+                            Node::Family => vec![(
+                                RelativeAttachment::<line_styles::AxisAligned>::Center,
+                                Vector::<f32>::new(1.0, 1.0),
+                            )],
+                        }
+                        .into_iter()
+                    })
                     .on_connect(Message::NodeConnect)
                     .on_disconnect(Message::NodeDisconnect)
                     .on_delete(Message::NodeDeleted)
@@ -218,8 +240,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 )))
             } else {
                 state
-                    .images
-                    .add(Image { path: path.clone() }, Point::ORIGIN);
+                    .nodes
+                    .add(Node::Character(Image { path: path.clone() }), Point::ORIGIN);
 
                 Task::none()
             }
@@ -295,7 +317,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
 
             match data {
                 Ok(data) => {
-                    state.images = data;
+                    state.nodes = data;
                     Task::none()
                 }
                 Err(err) => Task::done(Message::LoadDataFailed(err)),
@@ -309,7 +331,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::NodeDragged(event) => {
-            if let Ok(img) = state.images.get_mut(event.id) {
+            if let Some(img) = state.nodes.get_mut(event.id) {
                 img.move_to(event.new_position);
             }
             Task::none()
@@ -320,15 +342,62 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             b,
             b_attachment,
         }) => {
-            let _ = state.images.connect(a, a_attachment, b, b_attachment);
+            if let RelativeAttachment::Edge { edge: a_edge, .. } = a_attachment.clone()
+                && let RelativeAttachment::Edge { edge: b_edge, .. } = b_attachment.clone()
+            {
+                let a_point = state.nodes.get(a).unwrap().position();
+                let b_point = state.nodes.get(b).unwrap().position();
+
+                let halfway_point = a_point + (b_point - a_point) * 0.5;
+
+                match (a_edge, b_edge) {
+                    (Edge::Left, Edge::Right) => {
+                        let _ = state.nodes.add_to(
+                            Node::Family,
+                            halfway_point,
+                            RelativeAttachment::Center,
+                            a,
+                            RelativeAttachment::left(),
+                        );
+
+                        let _ = state.nodes.connect(
+                            b,
+                            b_attachment,
+                            state.nodes.num_nodes() - 1,
+                            RelativeAttachment::Center,
+                        );
+                    }
+                    (Edge::Right, Edge::Left) => {
+                        let _ = state.nodes.add_to(
+                            Node::Family,
+                            halfway_point,
+                            RelativeAttachment::Center,
+                            a,
+                            RelativeAttachment::right(),
+                        );
+
+                        let _ = state.nodes.connect(
+                            b,
+                            b_attachment,
+                            state.nodes.num_nodes() - 1,
+                            RelativeAttachment::Center,
+                        );
+                    }
+                    _ => (),
+                };
+
+                return Task::none();
+            }
+
+            let _ = state.nodes.connect(a, a_attachment, b, b_attachment);
             Task::none()
         }
         Message::NodeDisconnect(i) => {
-            state.images.disconnect(i);
+            state.nodes.disconnect(i);
             Task::none()
         }
         Message::NodeDeleted(i) => {
-            state.images.remove(i);
+            state.nodes.remove(i);
             Task::none()
         }
         Message::ImageButtonPressed => {
@@ -337,7 +406,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::MenuButtonPressed => Task::none(),
         Message::Save => {
-            let parsed = toml::to_string(&state.images).unwrap();
+            let parsed = toml::to_string(&state.nodes).unwrap();
 
             if let Some(folder) = &state.folder {
                 Task::perform(
@@ -387,6 +456,13 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
 
             Task::none()
         }
+        Message::TraverseGraph => {
+            state
+                .nodes
+                .iter_bfs(0)
+                .for_each(|(i, node)| println!("for_each {i}: {:?}", node.data()));
+            Task::none()
+        }
     }
 }
 
@@ -397,45 +473,58 @@ fn subscription(_state: &State) -> Subscription<Message> {
             (Modifiers::CTRL, Key::Character(char)) if char.eq("o") => {
                 Some(Message::OpenLoadFolderDialog)
             }
+            (Modifiers::CTRL, Key::Character(char)) if char.eq("t") => Some(Message::TraverseGraph),
             _ => None,
         }),
         iced::time::every(Duration::from_millis(20)).map(|_| Message::Tick),
     ])
 }
 
-fn view_image(img: &Image) -> Element<'_, Message> {
-    container(
-        column![
-            image(img.path.clone())
-                .width(Fill)
-                .height(Fill)
-                .filter_method(image::FilterMethod::Nearest),
-            opaque(
-                column![
-                    text(img.path.file_name().unwrap().to_str().unwrap().to_owned())
-                        .center()
-                        .width(Fill),
-                    base_button("ahkdlfjs").on_press(Message::ImageButtonPressed)
-                ]
-                .width(Fill)
-                .spacing(5.0)
-            ),
-        ]
-        .spacing(5.0),
-    )
-    .width(150.0)
-    .height(150.0)
-    .padding(5.0)
-    .style(|theme: &Theme| {
-        let palette = theme.extended_palette();
-        container::Style::default()
-            .background(palette.background.base.color)
-            .border(
-                Border::default()
-                    .rounded(15.0)
-                    .width(2.0)
-                    .color(palette.background.weak.color),
-            )
-    })
-    .into()
+fn view_node(node: &Node) -> Element<'_, Message> {
+    match node {
+        Node::Character(img) => container(
+            column![
+                image(img.path.clone())
+                    .width(Fill)
+                    .height(Fill)
+                    .filter_method(image::FilterMethod::Nearest),
+                opaque(
+                    column![
+                        text(img.path.file_name().unwrap().to_str().unwrap().to_owned())
+                            .center()
+                            .width(Fill),
+                        base_button("ahkdlfjs").on_press(Message::ImageButtonPressed)
+                    ]
+                    .width(Fill)
+                    .spacing(5.0)
+                ),
+            ]
+            .spacing(5.0),
+        )
+        .width(150.0)
+        .height(150.0)
+        .padding(5.0)
+        .style(|theme: &Theme| {
+            let palette = theme.extended_palette();
+            container::Style::default()
+                .background(palette.background.base.color)
+                .border(
+                    Border::default()
+                        .rounded(15.0)
+                        .width(2.0)
+                        .color(palette.background.weak.color),
+                )
+        })
+        .into(),
+        Node::Family => container("")
+            .width(10.0)
+            .height(10.0)
+            .style(|theme: &Theme| container::Style {
+                text_color: None,
+                background: Some(theme.palette().success.into()),
+                border: Border::default().rounded(10.0),
+                ..Default::default()
+            })
+            .into(),
+    }
 }

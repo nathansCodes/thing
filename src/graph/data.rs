@@ -3,7 +3,10 @@ use std::collections::VecDeque;
 use iced::Point;
 use serde::{Deserialize, Serialize};
 
-use crate::graph::connections::{self, Attachment, Connection, RelativeAttachment};
+use crate::graph::{
+    connections::{self, Attachment, Connection, RelativeAttachment},
+    iter::{BreadthFirstIterator, DepthFirstIterator},
+};
 
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "Point")]
@@ -67,8 +70,8 @@ where
         self.nodes.get(id).ok_or(GraphError::NodeNotFound(id))
     }
 
-    pub fn get_mut(&mut self, id: usize) -> Result<&mut GraphNode<Data>, GraphError> {
-        self.nodes.get_mut(id).ok_or(GraphError::NodeNotFound(id))
+    pub fn get_mut(&mut self, id: usize) -> Option<&mut GraphNode<Data>> {
+        self.nodes.get_mut(id)
     }
 
     pub fn add(&mut self, node: Data, position: Point) {
@@ -168,9 +171,77 @@ where
         });
     }
 
-    pub fn traverse<F>(&self, starting_node: Option<usize>, f: F)
+    pub fn traverse_iter(
+        &self,
+        starting_node: Option<usize>,
+    ) -> impl Iterator<Item = (usize, &GraphNode<Data>)> {
+        let mut visited = Vec::new();
+
+        let mut stack = VecDeque::with_capacity(self.nodes.len());
+
+        stack.push_back(starting_node.unwrap_or(0));
+
+        if *stack.iter().next().unwrap() >= self.nodes.len() {
+            return Vec::<(usize, &GraphNode<Data>)>::new().into_iter();
+        }
+
+        while !stack.is_empty() {
+            if visited.len() == self.nodes.len() {
+                break;
+            }
+
+            let current_node = *stack.iter().last().unwrap();
+
+            if !visited.contains(&current_node) {
+                visited.push(current_node);
+            }
+
+            let mut unvisited_connections = self.connections.iter().filter_map(|conn| {
+                (conn.a.0 == current_node)
+                    .then_some(conn.b.0)
+                    .or_else(|| (conn.b.0 == current_node).then_some(conn.a.0))
+                    .filter(|conn| !visited.contains(conn))
+            });
+
+            if let Some(next_node) = unvisited_connections.next() {
+                stack.push_back(next_node);
+            } else {
+                stack.pop_back();
+            }
+        }
+
+        visited
+            .iter()
+            .map(|id| (*id, &self.nodes[*id]))
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &GraphNode<Data>> {
+        self.nodes.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut GraphNode<Data>> {
+        self.nodes.iter_mut()
+    }
+
+    pub fn iter_dfs<'graph: 'iter, 'iter>(
+        &'graph self,
+        starting_node: usize,
+    ) -> DepthFirstIterator<'iter, Data, Attachment> {
+        DepthFirstIterator::new(self, starting_node)
+    }
+
+    pub fn iter_bfs<'graph: 'iter, 'iter>(
+        &'graph self,
+        starting_node: usize,
+    ) -> BreadthFirstIterator<'iter, Data, Attachment> {
+        BreadthFirstIterator::new(self, starting_node)
+    }
+
+    pub fn traverse_mut<F>(&mut self, starting_node: Option<usize>, mut f: F)
     where
-        F: Fn(usize, &GraphNode<Data>),
+        F: FnMut(usize, &mut GraphNode<Data>),
     {
         let mut visited = Vec::new();
 
@@ -190,7 +261,7 @@ where
             let current_node = *stack.iter().last().unwrap();
 
             if !visited.contains(&current_node) {
-                f(current_node, &self.nodes[current_node]);
+                f(current_node, &mut self.nodes[current_node]);
                 visited.push(current_node);
             }
 
@@ -206,53 +277,6 @@ where
             } else {
                 stack.pop_back();
             }
-        }
-    }
-
-    pub fn traverse_breadth_first<F>(&self, starting_node: Option<usize>, f: F)
-    where
-        F: Fn(usize, &GraphNode<Data>),
-    {
-        let mut visited = Vec::new();
-
-        let mut queue = VecDeque::with_capacity(self.nodes.len());
-
-        let starting_node = starting_node.unwrap_or(0);
-
-        if starting_node >= self.nodes.len() {
-            return;
-        }
-
-        queue.push_back(starting_node);
-        visited.push(starting_node);
-        f(starting_node, &self.nodes[starting_node]);
-
-        while !queue.is_empty() {
-            if visited.len() == self.nodes.len() {
-                break;
-            }
-
-            let current_node = *queue.front().unwrap();
-
-            let unvisited_connections: Vec<_> = self
-                .connections
-                .iter()
-                .filter_map(|conn| {
-                    (conn.a.0 == current_node)
-                        .then_some(conn.b.0)
-                        .or_else(|| (conn.b.0 == current_node).then_some(conn.a.0))
-                        .filter(|conn| !visited.contains(conn))
-                })
-                .collect();
-
-            queue.extend(unvisited_connections.iter());
-            visited.extend(unvisited_connections.iter());
-
-            for node in &unvisited_connections {
-                f(*node, &self.nodes[*node]);
-            }
-
-            queue.pop_front();
         }
     }
 }
