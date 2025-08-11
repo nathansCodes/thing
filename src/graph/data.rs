@@ -126,6 +126,20 @@ where
         })
     }
 
+    pub fn get_connections_indexed(
+        &self,
+        id: usize,
+    ) -> impl Iterator<Item = (usize, &Attachment, usize, &Attachment)> {
+        self.connections
+            .iter()
+            .enumerate()
+            .filter_map(move |(i, conn)| {
+                (conn.a.0 == id)
+                    .then_some((i, &conn.a.1, conn.b.0, &conn.b.1))
+                    .or_else(|| (conn.b.0 == id).then_some((i, &conn.b.1, conn.a.0, &conn.a.1)))
+            })
+    }
+
     pub fn connect(
         &mut self,
         a: usize,
@@ -155,12 +169,13 @@ where
         self.nodes.len()
     }
 
-    pub fn disconnect(&mut self, a: usize, b: usize) {
-        if let Some(i) = self.connections.iter().enumerate().find_map(|(i, conn)| {
-            ((conn.a.0 == a && conn.b.0 == b) || (conn.b.0 == a && conn.a.0 == b)).then_some(i)
-        }) {
-            self.connections.remove(i);
-        }
+    pub fn disconnect_all(&mut self, a: usize, b: usize) {
+        self.connections
+            .retain(|conn| !((conn.a.0 == a && conn.b.0 == b) || (conn.b.0 == a && conn.a.0 == b)));
+    }
+
+    pub fn remove_connection(&mut self, connection_id: usize) {
+        self.connections.remove(connection_id);
     }
 
     pub fn remove(&mut self, i: usize) {
