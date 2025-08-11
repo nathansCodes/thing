@@ -1,3 +1,5 @@
+pub mod graph;
+
 use iced::{
     Alignment, Element, Font,
     Length::Fill,
