@@ -127,6 +127,84 @@ where
             _phantom: PhantomData,
         }
     }
+
+    pub fn is_top(&self) -> bool {
+        matches!(
+            self,
+            Self::Edge {
+                edge: Edge::Top,
+                ..
+            }
+        )
+    }
+
+    pub fn is_right(&self) -> bool {
+        matches!(
+            self,
+            Self::Edge {
+                edge: Edge::Right,
+                ..
+            }
+        )
+    }
+
+    pub fn is_bottom(&self) -> bool {
+        matches!(
+            self,
+            Self::Edge {
+                edge: Edge::Bottom,
+                ..
+            }
+        )
+    }
+
+    pub fn is_left(&self) -> bool {
+        matches!(
+            self,
+            Self::Edge {
+                edge: Edge::Left,
+                ..
+            }
+        )
+    }
+
+    pub fn is_center(&self) -> bool {
+        matches!(self, Self::Center)
+    }
+
+    pub fn is_horizontal(&self) -> bool {
+        matches!(
+            self,
+            Self::Edge {
+                edge: Edge::Left | Edge::Right,
+                ..
+            }
+        )
+    }
+
+    pub fn is_vertical(&self) -> bool {
+        matches!(
+            self,
+            Self::Edge {
+                edge: Edge::Top | Edge::Bottom,
+                ..
+            }
+        )
+    }
+}
+
+impl<Style> TryFrom<RelativeAttachment<Style>> for Edge
+where
+    Style: line_styles::LineStyle,
+{
+    type Error = ();
+
+    fn try_from(value: RelativeAttachment<Style>) -> Result<Self, Self::Error> {
+        match value {
+            RelativeAttachment::Center => Err(()),
+            RelativeAttachment::Edge { edge, .. } => Ok(edge),
+        }
+    }
 }
 
 impl<Style> Attachment for RelativeAttachment<Style>

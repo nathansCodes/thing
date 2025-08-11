@@ -6,7 +6,8 @@ mod style;
 mod widgets;
 
 use crate::graph::connections::Edge;
-use crate::graph::{OnConnectEvent, RelativeAttachment, line_styles};
+use crate::graph::line_styles::AxisAligned;
+use crate::graph::{GraphNode, OnConnectEvent, RelativeAttachment, line_styles};
 use crate::notification::Notification;
 use crate::widgets::*;
 
@@ -19,7 +20,7 @@ use iced::{
     font::Weight,
     widget::{column, container, image, opaque, pane_grid, pane_grid::Configuration, text},
 };
-use iced::{Subscription, Vector, keyboard};
+use iced::{Size, Subscription, Vector, keyboard};
 use iced_aw::{menu, menu::Item, menu_bar};
 use serde::{Deserialize, Serialize};
 use std::io::ErrorKind;
@@ -76,7 +77,7 @@ struct State {
     notifications: Vec<Notification>,
 }
 
-#[derive(Default)]
+#[derive(Default, PartialEq)]
 enum Pane {
     #[default]
     Assets,
@@ -96,7 +97,7 @@ pub enum Message {
     AssetsMessage(AssetsMessage),
     NodeDragged(NodeDraggedEvent),
     NodeConnect(OnConnectEvent<RelativeAttachment<line_styles::AxisAligned>>),
-    NodeDisconnect(usize),
+    NodeDisconnect(usize, usize),
     NodeDeleted(usize),
     ImageButtonPressed,
     Saved,
@@ -150,18 +151,18 @@ fn view(state: &State) -> Element<'_, Message> {
             Pane::Graph => {
                 let graph = Graph::new(&state.nodes, view_node)
                     .on_node_dragged(Message::NodeDragged)
-                    .per_node_attachments(move |node| {
+                    .position_nodes(position_scheme)
+                    .per_node_attachments(|node| {
                         match node {
-                            Node::Character(_) => {
-                                RelativeAttachment::<line_styles::AxisAligned>::all_edges(
-                                    Vector::new(0.15, 0.15),
-                                )
-                                .to_vec()
-                            }
-                            Node::Family => vec![(
-                                RelativeAttachment::<line_styles::AxisAligned>::Center,
-                                Vector::<f32>::new(1.0, 1.0),
-                            )],
+                            Node::Character(_) => vec![
+                                (RelativeAttachment::top(), Vector::new(0.15, 0.15)),
+                                (RelativeAttachment::left(), Vector::new(0.15, 0.15)),
+                                (RelativeAttachment::right(), Vector::new(0.15, 0.15)),
+                            ],
+                            Node::Family => vec![
+                                (RelativeAttachment::top(), Vector::new(1.0, 1.0)),
+                                (RelativeAttachment::bottom(), Vector::new(1.0, 1.0)),
+                            ],
                         }
                         .into_iter()
                     })
@@ -197,7 +198,7 @@ fn view(state: &State) -> Element<'_, Message> {
             }
         });
 
-        if !matches!(pane, Pane::Graph) {
+        if *pane != Pane::Graph {
             content = content.title_bar(title_bar);
         }
 
@@ -342,9 +343,26 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             b,
             b_attachment,
         }) => {
-            if let RelativeAttachment::Edge { edge: a_edge, .. } = a_attachment.clone()
-                && let RelativeAttachment::Edge { edge: b_edge, .. } = b_attachment.clone()
+            let a_node = state.nodes.get(a).unwrap().data();
+            let b_node = state.nodes.get(b).unwrap().data();
+
+            if (matches!(a_node, Node::Family) && a_attachment.is_horizontal())
+                || (matches!(b_node, Node::Family) && b_attachment.is_horizontal())
             {
+                return Task::none();
+            }
+
+            let Ok(a_edge) = Edge::try_from(a_attachment.clone()) else {
+                return Task::none();
+            };
+
+            let Ok(b_edge) = Edge::try_from(b_attachment.clone()) else {
+                return Task::none();
+            };
+
+            let family_present = matches!(a_node, Node::Family) || matches!(b_node, Node::Family);
+
+            if !family_present {
                 let a_point = state.nodes.get(a).unwrap().position();
                 let b_point = state.nodes.get(b).unwrap().position();
 
@@ -352,10 +370,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
 
                 match (a_edge, b_edge) {
                     (Edge::Left, Edge::Right) => {
-                        let _ = state.nodes.add_to(
+                        let _ = state.nodes.attach_new(
                             Node::Family,
                             halfway_point,
-                            RelativeAttachment::Center,
+                            RelativeAttachment::top(),
                             a,
                             RelativeAttachment::left(),
                         );
@@ -364,14 +382,14 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                             b,
                             b_attachment,
                             state.nodes.num_nodes() - 1,
-                            RelativeAttachment::Center,
+                            RelativeAttachment::top(),
                         );
                     }
                     (Edge::Right, Edge::Left) => {
-                        let _ = state.nodes.add_to(
+                        let _ = state.nodes.attach_new(
                             Node::Family,
                             halfway_point,
-                            RelativeAttachment::Center,
+                            RelativeAttachment::top(),
                             a,
                             RelativeAttachment::right(),
                         );
@@ -380,20 +398,21 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                             b,
                             b_attachment,
                             state.nodes.num_nodes() - 1,
-                            RelativeAttachment::Center,
+                            RelativeAttachment::top(),
                         );
                     }
                     _ => (),
-                };
+                }
 
                 return Task::none();
             }
 
             let _ = state.nodes.connect(a, a_attachment, b, b_attachment);
+
             Task::none()
         }
-        Message::NodeDisconnect(i) => {
-            state.nodes.disconnect(i);
+        Message::NodeDisconnect(a, b) => {
+            state.nodes.disconnect(a, b);
             Task::none()
         }
         Message::NodeDeleted(i) => {
@@ -526,5 +545,162 @@ fn view_node(node: &Node) -> Element<'_, Message> {
                 ..Default::default()
             })
             .into(),
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn position_scheme(
+    prev: Option<(
+        usize,
+        &GraphNode<Node>,
+        &RelativeAttachment<AxisAligned>,
+        &RelativeAttachment<AxisAligned>,
+        Size<f32>,
+    )>,
+    _id: usize,
+    node: &GraphNode<Node>,
+    size: iced::Size,
+    data: &GraphData<Node, RelativeAttachment<line_styles::AxisAligned>>,
+    layout: &iced::advanced::Layout<'_>,
+    visited: Vec<usize>,
+) -> Vector {
+    let Some((prev_id, prev, attachment, prev_attachment, prev_size)) = prev else {
+        return Vector::ZERO;
+    };
+
+    match node.data() {
+        Node::Character(_) => match prev.data() {
+            Node::Character(_) => unreachable!(),
+            Node::Family => match prev_attachment {
+                RelativeAttachment::Edge {
+                    edge: Edge::Bottom, ..
+                } => {
+                    let mut children: Vec<_> = data
+                        .get_connections(prev_id)
+                        .filter_map(|conn| {
+                            matches!(
+                                conn.0,
+                                RelativeAttachment::Edge {
+                                    edge: Edge::Bottom,
+                                    ..
+                                }
+                            )
+                            .then_some((
+                                conn.1,
+                                layout.children().nth(conn.1).unwrap().bounds().size(),
+                                false,
+                            ))
+                        })
+                        .collect();
+
+                    let mut num_partners = 0.0;
+
+                    for (i, (child_id, _, _)) in children.clone().iter().enumerate() {
+                        for (att, other_id, _) in data.get_connections(*child_id) {
+                            if let Node::Family = data.get(other_id).unwrap().data()
+                                && att.is_horizontal()
+                            {
+                                let Some(partner_id) = data.get_connections(other_id).find_map(
+                                    |(family_att, partner_id, _)| {
+                                        (family_att.is_top() && other_id != *child_id)
+                                            .then_some(partner_id)
+                                    },
+                                ) else {
+                                    continue;
+                                };
+
+                                let partner_size =
+                                    layout.children().nth(partner_id).unwrap().bounds().size();
+
+                                let elem = (partner_id, partner_size, true);
+
+                                if !children.contains(&elem) {
+                                    if att.is_right() {
+                                        children.insert(i, elem);
+                                        num_partners += 1.0;
+                                    } else if att.is_left() {
+                                        children.insert(i + 1, elem);
+                                        num_partners += 1.0;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let padding = 25.0;
+
+                    let leftmost = -children
+                        .iter()
+                        .fold(0.0, |acc, (_, size, _)| acc + size.width)
+                        / 2.0
+                        - (children.len() as f32 - 1.0) * padding;
+
+                    let mut visited_children: Vec<_> = children
+                        .iter()
+                        .filter(|(child_id, _, _)| visited.contains(child_id))
+                        .collect();
+
+                    let num_visited_children = visited_children.len();
+
+                    visited_children.extend(
+                        children
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, (id, _, is_partner))| {
+                                *i < num_visited_children && *is_partner && !visited.contains(id)
+                            })
+                            .map(|(_, a)| a),
+                    );
+
+                    let num_visited_children = visited_children.len();
+
+                    let x = leftmost
+                        + visited_children.iter().fold(0.0, |acc, (_, size, _)| {
+                            acc + size.width
+                                + padding
+                                    * ((num_visited_children > 0) as i32 as f32 + num_partners)
+                        });
+
+                    Vector::new(x, 75.0)
+                }
+                RelativeAttachment::Edge {
+                    edge: Edge::Top, ..
+                } => {
+                    let x = match attachment {
+                        RelativeAttachment::Edge {
+                            edge: Edge::Left, ..
+                        } => 30.0,
+                        RelativeAttachment::Edge {
+                            edge: Edge::Right, ..
+                        } => -20.0 - size.width,
+                        _ => unreachable!(),
+                    };
+
+                    Vector::new(x, -25.0 - size.height)
+                }
+                _ => unreachable!(),
+            },
+        },
+        Node::Family => {
+            if let Node::Character(_) = prev.data() {
+                let x = match prev_attachment {
+                    RelativeAttachment::Edge {
+                        edge: Edge::Left, ..
+                    } => -30.0,
+                    RelativeAttachment::Edge {
+                        edge: Edge::Right, ..
+                    } => 20.0 + prev_size.width,
+                    // TODO:
+                    RelativeAttachment::Edge {
+                        edge: Edge::Top, ..
+                    } => todo!(),
+                    _ => unreachable!(),
+                };
+
+                Vector::new(x, prev_size.height + 25.0)
+            } else {
+                unreachable!()
+            }
+        }
     }
 }
