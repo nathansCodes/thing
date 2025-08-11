@@ -10,6 +10,7 @@ where
     graph_data: &'graph GraphData<Data, Attachment>,
     visited: Vec<usize>,
     stack: VecDeque<usize>,
+    visit_all: bool,
 }
 
 impl<'graph, Data, Attachment> DepthFirstIterator<'graph, Data, Attachment>
@@ -28,7 +29,13 @@ where
             } else {
                 VecDeque::new()
             },
+            visit_all: false,
         }
+    }
+
+    pub fn visit_all(mut self, visit_all: bool) -> Self {
+        self.visit_all = visit_all;
+        self
     }
 }
 
@@ -51,6 +58,12 @@ where
         }
 
         if self.stack.is_empty() {
+            if self.visit_all {
+                let next = *self.stack.iter().find(|id| !self.visited.contains(id))?;
+                self.stack.push_back(next);
+                self.visited.push(next);
+                return Some((next, &self.graph_data.nodes[next]));
+            }
             return None;
         }
 
@@ -85,6 +98,7 @@ where
     graph_data: &'a GraphData<Data, Attachment>,
     visited: Vec<usize>,
     queue: VecDeque<usize>,
+    visit_all: bool,
 }
 
 impl<'graph, Data, Attachment> BreadthFirstIterator<'graph, Data, Attachment>
@@ -103,7 +117,13 @@ where
             } else {
                 VecDeque::new()
             },
+            visit_all: false,
         }
+    }
+
+    pub fn visit_all(mut self, visit_all: bool) -> Self {
+        self.visit_all = visit_all;
+        self
     }
 }
 
@@ -127,6 +147,12 @@ where
         }
 
         if self.queue.is_empty() {
+            if self.visit_all {
+                let next = *self.queue.iter().find(|id| !self.visited.contains(id))?;
+                self.queue.push_back(next);
+                self.visited.push(next);
+                return Some((next, &self.graph_data.nodes[next]));
+            }
             return None;
         }
 
