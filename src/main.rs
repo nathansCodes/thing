@@ -1,15 +1,14 @@
 mod assets;
-mod graph;
 mod io;
 mod notification;
 mod style;
 mod widgets;
 
-use crate::graph::connections::Edge;
-use crate::graph::line_styles::AxisAligned;
-use crate::graph::{GraphEvent, GraphNode, RelativeAttachment, line_styles};
 use crate::notification::Notification;
-use crate::widgets::*;
+use graph::connections::Edge;
+use graph::line_styles::AxisAligned;
+use graph::{GraphEvent, GraphNode, RelativeAttachment, line_styles};
+use widgets::*;
 
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::{horizontal_space, row, scrollable, stack};
