@@ -4,12 +4,11 @@ mod iter;
 pub mod line_styles;
 mod state;
 
+use std::collections::VecDeque;
+
 pub use crate::graph::connections::{Attachment, RelativeAttachment};
-use crate::graph::{
-    data::GraphNode,
-    state::{CursorState, GraphState, Payload},
-};
-pub use data::GraphData;
+use crate::graph::state::{CursorState, GraphState, Payload};
+pub use data::{GraphData, GraphNode};
 
 use iced::{
     Border, Color, Element, Event, Gradient, Length, Padding, Point, Rectangle, Size, Theme,
@@ -47,9 +46,22 @@ where
     on_node_dragged: Option<Box<dyn Fn(NodeDraggedEvent) -> Message + 'a>>,
     get_attachment: Box<dyn Fn(&'a GraphNode<Data>, Vector) -> Option<Attachment> + 'a>,
     on_connect: Option<Box<dyn Fn(OnConnectEvent<Attachment>) -> Message + 'a>>,
-    on_disconnect: Option<Box<dyn Fn(usize) -> Message + 'a>>,
+    on_disconnect: Option<Box<dyn Fn(usize, usize) -> Message + 'a>>,
     on_delete: Option<Box<dyn Fn(usize) -> Message + 'a>>,
     on_connection_dropped: Option<Box<dyn Fn(usize, Attachment) -> Message + 'a>>,
+    node_positioning: Option<
+        Box<
+            dyn Fn(
+                Option<(usize, &GraphNode<Data>, &Attachment, &Attachment, Size<f32>)>,
+                usize,
+                &'a GraphNode<Data>,
+                Size,
+                &'a GraphData<Data, Attachment>,
+                &Layout,
+                Vec<usize>,
+            ) -> Vector,
+        >,
+    >,
     allow_self_connections: bool,
     allow_similar_connections: bool,
 }
@@ -81,6 +93,7 @@ where
             on_connection_dropped: None,
             allow_self_connections: false,
             allow_similar_connections: false,
+            node_positioning: None,
         }
     }
 
@@ -121,27 +134,23 @@ where
         self
     }
 
-    // pub fn position_nodes<F>(mut self, f: F) -> Self
-    // where
-    //     F: Fn(Option<usize>, usize, Size, Vec<usize>, Vec<usize>) -> Vector + 'a,
-    // {
-    //     self.node_positioning = Some(Box::new(|data, layout| {
-    //         let mut visited_nodes = Vec::new();
-    //         data.traverse_mut(Some(0), |i, node| {
-    //             f(
-    //                 visited_nodes.last().cloned(),
-    //                 i,
-    //                 layout.children().nth(i).unwrap().bounds().size(),
-    //                 data.get_connections(i).iter().map(|c| c.0).collect(),
-    //                 visited_nodes.clone(),
-    //             );
-    //
-    //             visited_nodes.push(i);
-    //         });
-    //     }));
-    //
-    //     self
-    // }
+    pub fn position_nodes<F>(mut self, f: F) -> Self
+    where
+        F: Fn(
+                Option<(usize, &GraphNode<Data>, &Attachment, &Attachment, Size<f32>)>,
+                usize,
+                &'a GraphNode<Data>,
+                Size,
+                &'a GraphData<Data, Attachment>,
+                &Layout,
+                Vec<usize>,
+            ) -> Vector
+            + 'static,
+    {
+        self.node_positioning = Some(Box::new(f));
+
+        self
+    }
 
     pub fn allow_similar_connections(mut self, value: bool) -> Self {
         self.allow_similar_connections = value;
@@ -171,7 +180,7 @@ where
 
     pub fn on_disconnect<F>(mut self, callback: F) -> Self
     where
-        F: 'a + Fn(usize) -> Message,
+        F: 'a + Fn(usize, usize) -> Message,
     {
         self.on_disconnect = Some(Box::new(callback));
         self
@@ -843,6 +852,7 @@ where
                         Payload::Node(id, status) => {
                             if status == &Status::Ignored
                                 && let Some(on_node_dragged) = &self.on_node_dragged
+                                && self.node_positioning.is_none()
                             {
                                 let mut new_position = state.drag_origin
                                     + (cursor_pos - state.drag_start_point)
@@ -923,10 +933,12 @@ where
                                 new_payload = Payload::Node(*id, Status::Captured);
                             }
 
+                            let mmb_or_shift_lmb_pressed = state.pressed_mb == Some(Button::Middle)
+                                || state.pressed_mb == Some(Button::Left) && state.shift_pressed;
+
                             if status == &Status::Ignored
-                                && (state.pressed_mb == Some(Button::Middle)
-                                    || state.pressed_mb == Some(Button::Left)
-                                        && state.shift_pressed)
+                                && mmb_or_shift_lmb_pressed
+                                && self.node_positioning.is_none()
                             {
                                 state.cursor_state = CursorState::Dragging(new_payload);
                             } else {
@@ -946,7 +958,8 @@ where
                             if state.pressed_mb == Some(Button::Left) =>
                         {
                             if let Some(on_disconnect) = &self.on_disconnect {
-                                shell.publish(on_disconnect(*connection));
+                                let conn = self.data.connections.get(*connection).unwrap();
+                                shell.publish(on_disconnect(conn.a.0, conn.b.0));
                             }
 
                             let connection = self
@@ -1040,7 +1053,8 @@ where
                                     })
                             {
                                 if let Some(on_disconnect) = &self.on_disconnect {
-                                    shell.publish(on_disconnect(id));
+                                    let conn = self.data.connections.get(id).unwrap();
+                                    shell.publish(on_disconnect(conn.a.0, conn.b.0));
                                 }
                             }
 
@@ -1161,8 +1175,8 @@ where
 
                         // disconnect
                         if let Some(on_disconnect) = &self.on_disconnect {
-                            for (i, _) in self.data.get_connections(corrected_node_id) {
-                                on_disconnect(i);
+                            for (_, other_id, _) in self.data.get_connections(corrected_node_id) {
+                                on_disconnect(corrected_node_id, other_id);
                             }
                         }
 
@@ -1212,6 +1226,103 @@ where
             }
             _ => (),
         };
+
+        if let Some(node_positioning) = &self.node_positioning
+            && let Some(on_node_moved) = &self.on_node_dragged
+            && status == Status::Captured
+            && !self.data.nodes.is_empty()
+        {
+            let num_nodes = self.data.nodes.len();
+            let mut queue = VecDeque::with_capacity(num_nodes);
+            let mut visited = Vec::with_capacity(num_nodes);
+
+            queue.push_back(0);
+            visited.push(0);
+
+            let first_pos = Point::ORIGIN
+                + node_positioning(
+                    None,
+                    0,
+                    &self.data.nodes[0],
+                    layout.children().next().unwrap().bounds().size(),
+                    self.data,
+                    &layout,
+                    visited.clone(),
+                );
+
+            let mut positions = Vec::from([first_pos]);
+            positions.reserve_exact(num_nodes - 1);
+
+            let mut correction = Vector::ZERO;
+
+            while !queue.is_empty() {
+                if visited.len() == self.data.nodes.len() {
+                    break;
+                }
+
+                let current_node = *queue.front().unwrap();
+                let current_pos =
+                    positions[visited.iter().position(|id| *id == current_node).unwrap()];
+
+                let unvisited_connections: Vec<_> = self
+                    .data
+                    .connections
+                    .iter()
+                    .filter_map(|conn| {
+                        (conn.a.0 == current_node)
+                            .then_some((conn.b.0, &conn.b.1, &conn.a.1))
+                            .or_else(|| {
+                                (conn.b.0 == current_node)
+                                    .then_some((conn.a.0, &conn.a.1, &conn.b.1))
+                            })
+                            .filter(|conn| !visited.contains(&conn.0))
+                    })
+                    .collect();
+
+                queue.extend(unvisited_connections.iter().map(|(id, ..)| *id));
+
+                for (node, attachment, conn_attachment) in &unvisited_connections {
+                    let prev_position = current_pos;
+
+                    let new_position = prev_position
+                        + node_positioning(
+                            Some((
+                                current_node,
+                                &self.data.nodes[current_node],
+                                attachment,
+                                conn_attachment,
+                                layout.children().nth(current_node).unwrap().bounds().size(),
+                            )),
+                            *node,
+                            &self.data.nodes[*node],
+                            layout.children().nth(*node).unwrap().bounds().size(),
+                            self.data,
+                            &layout,
+                            visited.clone(),
+                        );
+
+                    visited.push(*node);
+
+                    positions.push(new_position);
+
+                    if new_position.x < correction.x {
+                        correction.x = new_position.x;
+                    }
+                    if new_position.y < correction.y {
+                        correction.y = new_position.y;
+                    }
+                }
+
+                queue.pop_front();
+            }
+
+            for (id, new_position) in visited.iter().zip(positions) {
+                shell.publish(on_node_moved(NodeDraggedEvent {
+                    id: *id,
+                    new_position: new_position - correction,
+                }));
+            }
+        }
 
         status
     }

@@ -66,8 +66,8 @@ where
     Data: std::fmt::Debug,
     Attachment: self::Attachment + std::cmp::PartialEq,
 {
-    pub fn get(&self, id: usize) -> Result<&GraphNode<Data>, GraphError> {
-        self.nodes.get(id).ok_or(GraphError::NodeNotFound(id))
+    pub fn get(&self, id: usize) -> Option<&GraphNode<Data>> {
+        self.nodes.get(id)
     }
 
     pub fn get_mut(&mut self, id: usize) -> Option<&mut GraphNode<Data>> {
@@ -78,7 +78,7 @@ where
         self.nodes.push(GraphNode::new(position, node));
     }
 
-    pub fn add_to(
+    pub fn attach_new(
         &mut self,
         node: Data,
         position: Point,
@@ -115,12 +115,15 @@ where
             .collect()
     }
 
-    pub(super) fn get_connections(&self, id: usize) -> Vec<(usize, &Connection<Attachment>)> {
-        self.connections
-            .iter()
-            .enumerate()
-            .filter(|(_, conn)| conn.a.0 == id || conn.b.0 == id)
-            .collect()
+    pub fn get_connections(
+        &self,
+        id: usize,
+    ) -> impl Iterator<Item = (&Attachment, usize, &Attachment)> {
+        self.connections.iter().filter_map(move |conn| {
+            (conn.a.0 == id)
+                .then_some((&conn.a.1, conn.b.0, &conn.b.1))
+                .or_else(|| (conn.b.0 == id).then_some((&conn.b.1, conn.a.0, &conn.a.1)))
+        })
     }
 
     pub fn connect(
@@ -152,8 +155,12 @@ where
         self.nodes.len()
     }
 
-    pub fn disconnect(&mut self, i: usize) {
-        self.connections.remove(i);
+    pub fn disconnect(&mut self, a: usize, b: usize) {
+        if let Some(i) = self.connections.iter().enumerate().find_map(|(i, conn)| {
+            ((conn.a.0 == a && conn.b.0 == b) || (conn.b.0 == a && conn.a.0 == b)).then_some(i)
+        }) {
+            self.connections.remove(i);
+        }
     }
 
     pub fn remove(&mut self, i: usize) {
@@ -237,47 +244,6 @@ where
         starting_node: usize,
     ) -> BreadthFirstIterator<'iter, Data, Attachment> {
         BreadthFirstIterator::new(self, starting_node)
-    }
-
-    pub fn traverse_mut<F>(&mut self, starting_node: Option<usize>, mut f: F)
-    where
-        F: FnMut(usize, &mut GraphNode<Data>),
-    {
-        let mut visited = Vec::new();
-
-        let mut stack = VecDeque::with_capacity(self.nodes.len());
-
-        stack.push_back(starting_node.unwrap_or(0));
-
-        if *stack.iter().next().unwrap() >= self.nodes.len() {
-            return;
-        }
-
-        while !stack.is_empty() {
-            if visited.len() == self.nodes.len() {
-                break;
-            }
-
-            let current_node = *stack.iter().last().unwrap();
-
-            if !visited.contains(&current_node) {
-                f(current_node, &mut self.nodes[current_node]);
-                visited.push(current_node);
-            }
-
-            let mut unvisited_connections = self.connections.iter().filter_map(|conn| {
-                (conn.a.0 == current_node)
-                    .then_some(conn.b.0)
-                    .or_else(|| (conn.b.0 == current_node).then_some(conn.a.0))
-                    .filter(|conn| !visited.contains(conn))
-            });
-
-            if let Some(next_node) = unvisited_connections.next() {
-                stack.push_back(next_node);
-            } else {
-                stack.pop_back();
-            }
-        }
     }
 }
 
