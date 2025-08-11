@@ -7,7 +7,7 @@ mod widgets;
 
 use crate::graph::connections::Edge;
 use crate::graph::line_styles::AxisAligned;
-use crate::graph::{GraphNode, OnConnectEvent, RelativeAttachment, line_styles};
+use crate::graph::{GraphEvent, GraphNode, RelativeAttachment, line_styles};
 use crate::notification::Notification;
 use crate::widgets::*;
 
@@ -29,7 +29,7 @@ use std::time::Duration;
 
 use crate::{
     assets::{AssetType, AssetsMessage, AssetsPane},
-    graph::{Graph, GraphData, NodeDraggedEvent},
+    graph::{Graph, GraphData},
     io::{IOError, pick_file, pick_folder},
 };
 
@@ -95,10 +95,7 @@ pub enum Message {
     PaneDragged(pane_grid::DragEvent),
     PaneResized(pane_grid::ResizeEvent),
     AssetsMessage(AssetsMessage),
-    NodeDragged(NodeDraggedEvent),
-    NodeConnect(OnConnectEvent<RelativeAttachment<line_styles::AxisAligned>>),
-    NodeDisconnect(usize, usize),
-    NodeDeleted(usize),
+    GraphEvent(GraphEvent<RelativeAttachment<line_styles::AxisAligned>>),
     ImageButtonPressed,
     Saved,
     SaveFailed(std::io::ErrorKind),
@@ -150,7 +147,7 @@ fn view(state: &State) -> Element<'_, Message> {
         let mut content = pane_grid::Content::new(match pane {
             Pane::Graph => {
                 let graph = Graph::new(&state.nodes, view_node)
-                    .on_node_dragged(Message::NodeDragged)
+                    .on_event(Message::GraphEvent)
                     .position_nodes(position_scheme)
                     .per_node_attachments(|node| {
                         match node {
@@ -166,9 +163,6 @@ fn view(state: &State) -> Element<'_, Message> {
                         }
                         .into_iter()
                     })
-                    .on_connect(Message::NodeConnect)
-                    .on_disconnect(Message::NodeDisconnect)
-                    .on_delete(Message::NodeDeleted)
                     .allow_self_connections(true)
                     .allow_similar_connections(true);
 
@@ -331,94 +325,105 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             ));
             Task::none()
         }
-        Message::NodeDragged(event) => {
-            if let Some(img) = state.nodes.get_mut(event.id) {
-                img.move_to(event.new_position);
+        Message::GraphEvent(ev) => match ev {
+            GraphEvent::Move {
+                id,
+                new_position,
+                was_dragged: _,
+            } => {
+                if let Some(img) = state.nodes.get_mut(id) {
+                    img.move_to(new_position);
+                }
+                Task::none()
             }
-            Task::none()
-        }
-        Message::NodeConnect(OnConnectEvent {
-            a,
-            a_attachment,
-            b,
-            b_attachment,
-        }) => {
-            let a_node = state.nodes.get(a).unwrap().data();
-            let b_node = state.nodes.get(b).unwrap().data();
+            GraphEvent::Connect {
+                a,
+                a_attachment,
+                b,
+                b_attachment,
+            } => {
+                let a_node = state.nodes.get(a).unwrap().data();
+                let b_node = state.nodes.get(b).unwrap().data();
 
-            if (matches!(a_node, Node::Family) && a_attachment.is_horizontal())
-                || (matches!(b_node, Node::Family) && b_attachment.is_horizontal())
-            {
-                return Task::none();
-            }
-
-            let Ok(a_edge) = Edge::try_from(a_attachment.clone()) else {
-                return Task::none();
-            };
-
-            let Ok(b_edge) = Edge::try_from(b_attachment.clone()) else {
-                return Task::none();
-            };
-
-            let family_present = matches!(a_node, Node::Family) || matches!(b_node, Node::Family);
-
-            if !family_present {
-                let a_point = state.nodes.get(a).unwrap().position();
-                let b_point = state.nodes.get(b).unwrap().position();
-
-                let halfway_point = a_point + (b_point - a_point) * 0.5;
-
-                match (a_edge, b_edge) {
-                    (Edge::Left, Edge::Right) => {
-                        let _ = state.nodes.attach_new(
-                            Node::Family,
-                            halfway_point,
-                            RelativeAttachment::top(),
-                            a,
-                            RelativeAttachment::left(),
-                        );
-
-                        let _ = state.nodes.connect(
-                            b,
-                            b_attachment,
-                            state.nodes.num_nodes() - 1,
-                            RelativeAttachment::top(),
-                        );
-                    }
-                    (Edge::Right, Edge::Left) => {
-                        let _ = state.nodes.attach_new(
-                            Node::Family,
-                            halfway_point,
-                            RelativeAttachment::top(),
-                            a,
-                            RelativeAttachment::right(),
-                        );
-
-                        let _ = state.nodes.connect(
-                            b,
-                            b_attachment,
-                            state.nodes.num_nodes() - 1,
-                            RelativeAttachment::top(),
-                        );
-                    }
-                    _ => (),
+                if (matches!(a_node, Node::Family) && a_attachment.is_horizontal())
+                    || (matches!(b_node, Node::Family) && b_attachment.is_horizontal())
+                {
+                    return Task::none();
                 }
 
-                return Task::none();
+                let Ok(a_edge) = Edge::try_from(a_attachment.clone()) else {
+                    return Task::none();
+                };
+
+                let Ok(b_edge) = Edge::try_from(b_attachment.clone()) else {
+                    return Task::none();
+                };
+
+                let family_present =
+                    matches!(a_node, Node::Family) || matches!(b_node, Node::Family);
+
+                if !family_present {
+                    let a_point = state.nodes.get(a).unwrap().position();
+                    let b_point = state.nodes.get(b).unwrap().position();
+
+                    let halfway_point = a_point + (b_point - a_point) * 0.5;
+
+                    match (a_edge, b_edge) {
+                        (Edge::Left, Edge::Right) => {
+                            let _ = state.nodes.attach_new(
+                                Node::Family,
+                                halfway_point,
+                                RelativeAttachment::top(),
+                                a,
+                                RelativeAttachment::left(),
+                            );
+
+                            let _ = state.nodes.connect(
+                                b,
+                                b_attachment,
+                                state.nodes.num_nodes() - 1,
+                                RelativeAttachment::top(),
+                            );
+                        }
+                        (Edge::Right, Edge::Left) => {
+                            let _ = state.nodes.attach_new(
+                                Node::Family,
+                                halfway_point,
+                                RelativeAttachment::top(),
+                                a,
+                                RelativeAttachment::right(),
+                            );
+
+                            let _ = state.nodes.connect(
+                                b,
+                                b_attachment,
+                                state.nodes.num_nodes() - 1,
+                                RelativeAttachment::top(),
+                            );
+                        }
+                        _ => (),
+                    }
+
+                    return Task::none();
+                }
+
+                let _ = state.nodes.connect(a, a_attachment, b, b_attachment);
+
+                Task::none()
             }
-
-            let _ = state.nodes.connect(a, a_attachment, b, b_attachment);
-
-            Task::none()
-        }
-        Message::NodeDisconnect(a, b) => {
-            state.nodes.disconnect(a, b);
-            Task::none()
-        }
-        Message::NodeDeleted(i) => {
-            state.nodes.remove(i);
-            Task::none()
-        }
+            GraphEvent::Disconnect { connection_id } => {
+                state.nodes.remove_connection(connection_id);
+                Task::none()
+            }
+            GraphEvent::Delete { id } => {
+                state.nodes.remove(id);
+                Task::none()
+            }
+            GraphEvent::ConnectionDropped { id, attachment } => {
+                println!("Connection dropped: {id}-{attachment:?}");
+                Task::none()
+            }
+        },
         Message::ImageButtonPressed => {
             println!("pressd");
             Task::none()

@@ -43,12 +43,8 @@ where
 {
     data: &'a GraphData<Data, Attachment>,
     content: Vec<Element<'a, Message, Theme, Renderer>>,
-    on_node_dragged: Option<Box<dyn Fn(NodeDraggedEvent) -> Message + 'a>>,
     get_attachment: Box<dyn Fn(&'a GraphNode<Data>, Vector) -> Option<Attachment> + 'a>,
-    on_connect: Option<Box<dyn Fn(OnConnectEvent<Attachment>) -> Message + 'a>>,
-    on_disconnect: Option<Box<dyn Fn(usize, usize) -> Message + 'a>>,
-    on_delete: Option<Box<dyn Fn(usize) -> Message + 'a>>,
-    on_connection_dropped: Option<Box<dyn Fn(usize, Attachment) -> Message + 'a>>,
+    on_event: Option<Box<dyn Fn(GraphEvent<Attachment>) -> Message + 'a>>,
     node_positioning: Option<
         Box<
             dyn Fn(
@@ -85,12 +81,8 @@ where
         Self {
             data,
             content,
-            on_node_dragged: None,
             get_attachment: Box::new(|_, _| None),
-            on_connect: None,
-            on_disconnect: None,
-            on_delete: None,
-            on_connection_dropped: None,
+            on_event: None,
             allow_self_connections: false,
             allow_similar_connections: false,
             node_positioning: None,
@@ -162,43 +154,11 @@ where
         self
     }
 
-    pub fn on_node_dragged<F>(mut self, callback: F) -> Self
+    pub fn on_event<F>(mut self, on_event: F) -> Self
     where
-        F: 'a + Fn(NodeDraggedEvent) -> Message,
+        F: Fn(GraphEvent<Attachment>) -> Message + 'a,
     {
-        self.on_node_dragged = Some(Box::new(callback));
-        self
-    }
-
-    pub fn on_connect<F>(mut self, callback: F) -> Self
-    where
-        F: 'a + Fn(OnConnectEvent<Attachment>) -> Message,
-    {
-        self.on_connect = Some(Box::new(callback));
-        self
-    }
-
-    pub fn on_disconnect<F>(mut self, callback: F) -> Self
-    where
-        F: 'a + Fn(usize, usize) -> Message,
-    {
-        self.on_disconnect = Some(Box::new(callback));
-        self
-    }
-
-    pub fn on_delete<F>(mut self, callback: F) -> Self
-    where
-        F: 'a + Fn(usize) -> Message,
-    {
-        self.on_delete = Some(Box::new(callback));
-        self
-    }
-
-    pub fn on_connection_dropped<F>(mut self, callback: F) -> Self
-    where
-        F: 'a + Fn(usize, Attachment) -> Message,
-    {
-        self.on_connection_dropped = Some(Box::new(callback));
+        self.on_event = Some(Box::new(on_event));
         self
     }
 
@@ -851,7 +811,7 @@ where
                         }
                         Payload::Node(id, status) => {
                             if status == &Status::Ignored
-                                && let Some(on_node_dragged) = &self.on_node_dragged
+                                && let Some(on_event) = &self.on_event
                                 && self.node_positioning.is_none()
                             {
                                 let mut new_position = state.drag_origin
@@ -895,15 +855,17 @@ where
                                     })
                                     .collect();
 
-                                shell.publish(on_node_dragged(NodeDraggedEvent {
+                                shell.publish(on_event(GraphEvent::Move {
                                     id: *id,
                                     new_position: new_position + correction,
+                                    was_dragged: true,
                                 }));
 
                                 selections_positions.iter().for_each(|(id, new_position)| {
-                                    shell.publish(on_node_dragged(NodeDraggedEvent {
+                                    shell.publish(on_event(GraphEvent::Move {
                                         id: *id,
                                         new_position: *new_position + correction,
+                                        was_dragged: true,
                                     }));
                                 });
                             }
@@ -957,9 +919,10 @@ where
                         Payload::Connection(connection)
                             if state.pressed_mb == Some(Button::Left) =>
                         {
-                            if let Some(on_disconnect) = &self.on_disconnect {
-                                let conn = self.data.connections.get(*connection).unwrap();
-                                shell.publish(on_disconnect(conn.a.0, conn.b.0));
+                            if let Some(on_event) = &self.on_event {
+                                shell.publish(on_event(GraphEvent::Disconnect {
+                                    connection_id: *connection,
+                                }));
                             }
 
                             let connection = self
@@ -1036,40 +999,42 @@ where
 
                 match &state.cursor_state {
                     CursorState::Dragging(Payload::Attachment(a, a_attachment)) => {
-                        if let Payload::Attachment(b, b_attachment) = new_payload.clone()
-                            && let Some(on_connect) = &self.on_connect
-                        {
-                            let mut allowed = true;
+                        if let Some(on_event) = &self.on_event {
+                            if let Payload::Attachment(b, b_attachment) = new_payload.clone() {
+                                let mut allowed = true;
 
-                            if !self.allow_self_connections && *a == b {
-                                allowed = false;
-                            }
-
-                            if !self.allow_similar_connections
-                                && let Some((id, _)) =
-                                    self.data.connections.iter().enumerate().find(|(_, conn)| {
-                                        (conn.a.0 == *a && conn.b.0 == b)
-                                            || (conn.a.0 == b && conn.b.0 == *a)
-                                    })
-                            {
-                                if let Some(on_disconnect) = &self.on_disconnect {
-                                    let conn = self.data.connections.get(id).unwrap();
-                                    shell.publish(on_disconnect(conn.a.0, conn.b.0));
+                                if !self.allow_self_connections && *a == b {
+                                    allowed = false;
                                 }
-                            }
 
-                            if allowed {
-                                shell.publish(on_connect(OnConnectEvent::<Attachment> {
-                                    a: *a,
-                                    a_attachment: a_attachment.clone(),
-                                    b,
-                                    b_attachment,
-                                }));
+                                if !self.allow_similar_connections
+                                    && let Some((connection_id, _)) =
+                                        self.data.connections.iter().enumerate().find(
+                                            |(_, conn)| {
+                                                (conn.a.0 == *a && conn.b.0 == b)
+                                                    || (conn.a.0 == b && conn.b.0 == *a)
+                                            },
+                                        )
+                                {
+                                    shell.publish(on_event(GraphEvent::Disconnect {
+                                        connection_id,
+                                    }));
+                                }
+
+                                if allowed {
+                                    shell.publish(on_event(GraphEvent::Connect {
+                                        a: *a,
+                                        a_attachment: a_attachment.clone(),
+                                        b,
+                                        b_attachment,
+                                    }));
+                                }
+                            } else if matches!(new_payload, Payload::Background) {
+                                shell.publish(on_event(GraphEvent::ConnectionDropped {
+                                    id: *a,
+                                    attachment: a_attachment.clone(),
+                                }))
                             }
-                        } else if matches!(new_payload, Payload::Background)
-                            && let Some(on_connection_dropped) = &self.on_connection_dropped
-                        {
-                            shell.publish(on_connection_dropped(*a, a_attachment.clone()))
                         }
                     }
                     CursorState::Dragging(Payload::SelectionRect) => {
@@ -1159,7 +1124,7 @@ where
                 key: Key::Named(Named::Delete),
                 ..
             }) => {
-                if let Some(on_delete) = &self.on_delete {
+                if let Some(on_event) = &self.on_event {
                     for (selection_index, selected_node_id) in state.selection.iter().enumerate() {
                         // find how many of the previous selections have an id less than the
                         // current one and subtract the current one from that. we don't want an
@@ -1174,10 +1139,10 @@ where
                         let corrected_node_id = *selected_node_id - correction.min(selection_index);
 
                         // disconnect
-                        if let Some(on_disconnect) = &self.on_disconnect {
-                            for (_, other_id, _) in self.data.get_connections(corrected_node_id) {
-                                on_disconnect(corrected_node_id, other_id);
-                            }
+                        for (connection_id, _, _, _) in
+                            self.data.get_connections_indexed(corrected_node_id)
+                        {
+                            on_event(GraphEvent::Disconnect { connection_id });
                         }
 
                         match new_payload {
@@ -1195,7 +1160,9 @@ where
                             _ => (),
                         }
 
-                        shell.publish(on_delete(corrected_node_id));
+                        shell.publish(on_event(GraphEvent::Delete {
+                            id: corrected_node_id,
+                        }));
                     }
 
                     state.selection.clear();
@@ -1228,7 +1195,7 @@ where
         };
 
         if let Some(node_positioning) = &self.node_positioning
-            && let Some(on_node_moved) = &self.on_node_dragged
+            && let Some(on_event) = &self.on_event
             && status == Status::Captured
             && !self.data.nodes.is_empty()
         {
@@ -1317,9 +1284,10 @@ where
             }
 
             for (id, new_position) in visited.iter().zip(positions) {
-                shell.publish(on_node_moved(NodeDraggedEvent {
+                shell.publish(on_event(GraphEvent::Move {
                     id: *id,
                     new_position: new_position - correction,
+                    was_dragged: false,
                 }));
             }
         }
@@ -1345,20 +1313,31 @@ where
 }
 
 #[derive(Clone, Debug)]
-pub struct NodeDraggedEvent {
-    pub id: usize,
-    pub new_position: Point,
-}
-
-#[derive(Clone, Debug)]
-pub struct OnConnectEvent<Attachment = RelativeAttachment>
+pub enum GraphEvent<Attachment = RelativeAttachment>
 where
     Attachment: connections::Attachment,
 {
-    pub a: usize,
-    pub a_attachment: Attachment,
-    pub b: usize,
-    pub b_attachment: Attachment,
+    Move {
+        id: usize,
+        new_position: Point,
+        was_dragged: bool,
+    },
+    Connect {
+        a: usize,
+        a_attachment: Attachment,
+        b: usize,
+        b_attachment: Attachment,
+    },
+    Disconnect {
+        connection_id: usize,
+    },
+    Delete {
+        id: usize,
+    },
+    ConnectionDropped {
+        id: usize,
+        attachment: Attachment,
+    },
 }
 
 fn transform_node_bounds(
