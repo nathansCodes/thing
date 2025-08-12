@@ -41,6 +41,8 @@ where
     Attachment: connections::Attachment + PartialEq,
     Message: 'a,
 {
+    position: Vector,
+    zoom: f32,
     data: &'a GraphData<Data, Attachment>,
     content: Vec<Element<'a, Message, Theme, Renderer>>,
     get_attachment: Box<dyn Fn(&'a GraphNode<Data>, Vector) -> Option<Attachment> + 'a>,
@@ -79,6 +81,8 @@ where
             .collect();
 
         Self {
+            position: Vector::ZERO,
+            zoom: 1.0,
             data,
             content,
             get_attachment: Box::new(|_, _| None),
@@ -87,6 +91,16 @@ where
             allow_similar_connections: false,
             node_positioning: None,
         }
+    }
+
+    pub fn position(mut self, position: Vector) -> Self {
+        self.position = position;
+        self
+    }
+
+    pub fn zoom(mut self, zoom: f32) -> Self {
+        self.zoom = zoom;
+        self
     }
 
     pub fn node_attachments(mut self, attachments: &'a [(Attachment, Vector)]) -> Self {
@@ -162,12 +176,7 @@ where
         self
     }
 
-    fn find_hovered_connection(
-        &self,
-        state: &GraphState<Attachment>,
-        cursor_pos: Point,
-        layout: &Layout<'_>,
-    ) -> Option<usize> {
+    fn find_hovered_connection(&self, cursor_pos: Point, layout: &Layout<'_>) -> Option<usize> {
         self.data
             .connections
             .iter()
@@ -198,7 +207,7 @@ where
 
                 let mut path: Vec<_> =
                     Attachment::path(connection.a.1.clone(), from, connection.b.1.clone(), to)
-                        .transform(&Transform2D::scale(state.zoom, state.zoom))
+                        .transform(&Transform2D::scale(self.zoom, self.zoom))
                         .raw()
                         .iter()
                         .collect();
@@ -207,8 +216,8 @@ where
                 path.pop();
 
                 let origin = lyon_algorithms::geom::euclid::Point2D::new(
-                    cursor_pos.x - layout.position().x - state.position.x * state.zoom,
-                    cursor_pos.y - layout.position().y - state.position.y * state.zoom,
+                    cursor_pos.x - layout.position().x - self.position.x * self.zoom,
+                    cursor_pos.y - layout.position().y - self.position.y * self.zoom,
                 );
 
                 let directions: Vec<_> = [
@@ -247,7 +256,6 @@ where
         layout: &Layout<'_>,
         tree_children: &mut [Tree],
         cursor: Cursor,
-        state: &GraphState<Attachment>,
         event: Event,
         renderer: &Renderer,
         clipboard: &mut dyn Clipboard,
@@ -269,8 +277,8 @@ where
                             Cursor::Available(point) => Cursor::Available(
                                 layout.position()
                                     + (point - layout.position())
-                                        * Transformation::scale(1.0 / state.zoom)
-                                    - state.position,
+                                        * Transformation::scale(1.0 / self.zoom)
+                                    - self.position,
                             ),
                         };
 
@@ -291,8 +299,8 @@ where
 
                         let child_bounds = transform_node_bounds(
                             node_layout.bounds(),
-                            state.zoom,
-                            state.position,
+                            self.zoom,
+                            self.position,
                             node.position,
                         );
 
@@ -321,7 +329,7 @@ where
             .unwrap_or_else(|| {
                 cursor
                     .position()
-                    .and_then(|cursor_pos| self.find_hovered_connection(state, cursor_pos, layout))
+                    .and_then(|cursor_pos| self.find_hovered_connection(cursor_pos, layout))
                     .map(Payload::Connection)
                     .unwrap_or(Payload::Background)
             })
@@ -379,9 +387,9 @@ where
             renderer.with_translation(
                 Vector::new(bounds_position.x, bounds_position.y),
                 |renderer| {
-                    renderer.with_transformation(Transformation::scale(state.zoom), |renderer| {
+                    renderer.with_transformation(Transformation::scale(self.zoom), |renderer| {
                         let mut frame =
-                            Frame::new(renderer, layout.bounds().size() * (1.0 / state.zoom));
+                            Frame::new(renderer, layout.bounds().size() * (1.0 / self.zoom));
 
                         // draw connections
                         for (i, connection) in self.data.connections.iter().enumerate() {
@@ -412,8 +420,8 @@ where
                             let a_attachment = connection.a.1.clone();
                             let b_attachment = connection.b.1.clone();
 
-                            let from = a_attachment.resolve(a_size, a.position + state.position);
-                            let to = b_attachment.resolve(b_size, b.position + state.position);
+                            let from = a_attachment.resolve(a_size, a.position + self.position);
+                            let to = b_attachment.resolve(b_size, b.position + self.position);
 
                             let path = Attachment::path(a_attachment, from, b_attachment, to);
 
@@ -421,7 +429,7 @@ where
                                 &path,
                                 Stroke::default()
                                     .with_color(palette.secondary.strong.color)
-                                    .with_width(5.0 / state.zoom)
+                                    .with_width(5.0 / self.zoom)
                                     .with_line_join(LineJoin::Bevel)
                                     .with_line_cap(LineCap::Round),
                             );
@@ -434,7 +442,7 @@ where
                                     &path,
                                     Stroke::default()
                                         .with_color(palette.secondary.strong.color.scale_alpha(0.3))
-                                        .with_width(10.0 / state.zoom)
+                                        .with_width(10.0 / self.zoom)
                                         .with_line_join(LineJoin::Bevel)
                                         .with_line_cap(LineCap::Round),
                                 );
@@ -454,10 +462,10 @@ where
                                 .size();
 
                             let attachment_point =
-                                attachment.resolve(size, node.position + state.position);
+                                attachment.resolve(size, node.position + self.position);
 
                             frame.fill(
-                                &Path::circle(attachment_point, 10.0 / state.zoom),
+                                &Path::circle(attachment_point, 10.0 / self.zoom),
                                 palette.primary.strong.color,
                             );
                         }
@@ -475,35 +483,35 @@ where
                                 .bounds()
                                 .size();
 
-                            let from = attachment.resolve(size, node.position + state.position);
+                            let from = attachment.resolve(size, node.position + self.position);
 
                             let to = (state.cursor_pos
                                 - Vector::new(bounds_position.x, bounds_position.y))
-                                * Transformation::scale(1.0 / state.zoom);
+                                * Transformation::scale(1.0 / self.zoom);
 
                             frame.stroke(
                                 &Path::line(from, to),
                                 Stroke::default()
                                     .with_color(palette.secondary.strong.color)
-                                    .with_width(5.0 / state.zoom)
+                                    .with_width(5.0 / self.zoom)
                                     .with_line_cap(LineCap::Round),
                             );
                             frame.fill(
-                                &Path::circle(from, 7.5 / state.zoom),
+                                &Path::circle(from, 7.5 / self.zoom),
                                 palette.primary.strong.color,
                             );
                         }
 
                         renderer.draw_geometry(frame.into_geometry());
 
-                        let bounds = layout.bounds() * Transformation::scale(1.0 / state.zoom);
+                        let bounds = layout.bounds() * Transformation::scale(1.0 / self.zoom);
 
                         let width = bounds.width;
                         let height = bounds.height;
 
                         let step_size = match () {
-                            () if state.zoom < 0.55 => 60.,
-                            () if state.zoom < 0.85 => 30.,
+                            () if self.zoom < 0.55 => 60.,
+                            () if self.zoom < 0.85 => 30.,
                             () => 15.,
                         };
 
@@ -515,12 +523,12 @@ where
                                 let x = i as f32 * step_size;
                                 let y = j as f32 * step_size;
                                 let pos = Point::new(
-                                    x + state.position.x % step_size,
-                                    y + state.position.y % step_size,
+                                    x + self.position.x % step_size,
+                                    y + self.position.y % step_size,
                                 );
                                 let rect = Rectangle::new(
                                     pos,
-                                    Size::new(2.0 / state.zoom, 2.0 / state.zoom),
+                                    Size::new(2.0 / self.zoom, 2.0 / self.zoom),
                                 );
 
                                 renderer.fill_quad(
@@ -546,8 +554,8 @@ where
             .filter_map(|((((i, element), tree), node_layout), data)| {
                 transform_node_bounds(
                     node_layout.bounds(),
-                    state.zoom,
-                    state.position,
+                    self.zoom,
+                    self.position,
                     data.position,
                 )
                 .intersection(&layout.bounds())
@@ -555,12 +563,12 @@ where
             })
             .for_each(|(i, node, tree, node_layout, data, bounds)| {
                 renderer.with_layer(bounds, |renderer| {
-                    renderer.with_transformation(Transformation::scale(state.zoom), |renderer| {
+                    renderer.with_transformation(Transformation::scale(self.zoom), |renderer| {
                         let node_pos = Vector::new(layout.position().x, layout.position().y);
 
                         renderer.with_translation(
-                            state.position - node_pos
-                                + node_pos * Transformation::scale(1.0 / state.zoom),
+                            self.position - node_pos
+                                + node_pos * Transformation::scale(1.0 / self.zoom),
                             |renderer| {
                                 // make sure the cursor position is transformed properly
                                 let cursor = match cursor {
@@ -568,8 +576,8 @@ where
                                     Cursor::Available(point) => Cursor::Available(
                                         layout.position()
                                             + (point - layout.position())
-                                                * Transformation::scale(1.0 / state.zoom)
-                                            - state.position,
+                                                * Transformation::scale(1.0 / self.zoom)
+                                            - self.position,
                                     ),
                                 };
 
@@ -590,8 +598,8 @@ where
                             Quad {
                                 bounds: transform_node_bounds(
                                     node_layout.bounds(),
-                                    state.zoom,
-                                    state.position,
+                                    self.zoom,
+                                    self.position,
                                     data.position,
                                 ),
                                 border: Border::default()
@@ -620,7 +628,7 @@ where
                                 .background
                                 .base
                                 .color
-                                .scale_alpha(state.position.x.max(-10.0) / -10.0),
+                                .scale_alpha(self.position.x.max(-10.0) / -10.0),
                         },
                         ColorStop {
                             offset: 10.0 / layout.bounds().width,
@@ -662,7 +670,7 @@ where
                                 .background
                                 .base
                                 .color
-                                .scale_alpha(state.position.y.max(-10.0) / -10.0),
+                                .scale_alpha(self.position.y.max(-10.0) / -10.0),
                         },
                     ]),
                 ),
@@ -739,7 +747,7 @@ where
         renderer.fill_quad(
             Quad {
                 bounds: Rectangle::new(
-                    layout.bounds().center() + state.position,
+                    layout.bounds().center() + self.position,
                     Size::new(5.0, 5.0),
                 ),
                 ..Default::default()
@@ -783,13 +791,16 @@ where
             &layout,
             &mut tree.children,
             cursor,
-            state,
             event.clone(),
             renderer,
             clipboard,
             &mut status,
             shell,
         );
+
+        let Some(on_event) = &self.on_event else {
+            return Status::Ignored;
+        };
 
         match event {
             Event::Touch(ev) => {
@@ -805,15 +816,14 @@ where
                         Payload::Background => {
                             let mut new_position = state.drag_origin
                                 + (cursor_pos - state.drag_start_point)
-                                    * Transformation::scale(1.0 / state.zoom);
+                                    * Transformation::scale(1.0 / self.zoom);
 
                             // limiting the position to negative values cause the
                             // renderer doesn't render elements with negative positions properly
                             new_position.x = new_position.x.min(0.0);
                             new_position.y = new_position.y.min(0.0);
 
-                            state.position.x = new_position.x;
-                            state.position.y = new_position.y;
+                            shell.publish(on_event(GraphEvent::Move(new_position)));
                             shell.invalidate_layout();
                         }
                         Payload::Node(id, status) => {
@@ -823,7 +833,7 @@ where
                             {
                                 let mut new_position = state.drag_origin
                                     + (cursor_pos - state.drag_start_point)
-                                        * Transformation::scale(1.0 / state.zoom);
+                                        * Transformation::scale(1.0 / self.zoom);
 
                                 // same reason as before except that i limit it to positive values for some
                                 // reason
@@ -862,14 +872,14 @@ where
                                     })
                                     .collect();
 
-                                shell.publish(on_event(GraphEvent::Move {
+                                shell.publish(on_event(GraphEvent::MoveNode {
                                     id: *id,
                                     new_position: new_position + correction,
                                     was_dragged: true,
                                 }));
 
                                 selections_positions.iter().for_each(|(id, new_position)| {
-                                    shell.publish(on_event(GraphEvent::Move {
+                                    shell.publish(on_event(GraphEvent::MoveNode {
                                         id: *id,
                                         new_position: *new_position + correction,
                                         was_dragged: true,
@@ -883,8 +893,8 @@ where
                     },
                     CursorState::Hovering(payload) => match payload {
                         Payload::Background => {
-                            state.drag_origin.x = state.position.x;
-                            state.drag_origin.y = state.position.y;
+                            state.drag_origin.x = self.position.x;
+                            state.drag_origin.y = self.position.y;
                             state.drag_start_point = cursor_pos;
                             state.cursor_state = if state.pressed_mb == Some(Button::Middle) {
                                 CursorState::Dragging(new_payload)
@@ -959,9 +969,9 @@ where
                             let b_attachment = connection.b.1.clone();
 
                             let a_att_pos =
-                                a_attachment.resolve(a_size, a.position + state.position);
+                                a_attachment.resolve(a_size, a.position + self.position);
                             let b_att_pos =
-                                b_attachment.resolve(b_size, b.position + state.position);
+                                b_attachment.resolve(b_size, b.position + self.position);
 
                             let cursor_pos =
                                 cursor_pos - Vector::new(layout.position().x, layout.position().y);
@@ -1064,8 +1074,8 @@ where
                             .filter_map(|(i, (child, node))| {
                                 rect.intersects(&transform_node_bounds(
                                     child.bounds(),
-                                    state.zoom,
-                                    state.position,
+                                    self.zoom,
+                                    self.position,
                                     node.position,
                                 ))
                                 .then_some(i)
@@ -1118,11 +1128,14 @@ where
                     ScrollDelta::Pixels { x, y } => (x, y * 0.05),
                 };
 
-                state.position.x = (state.position.x + delta_x * 5.0).min(0.0);
+                shell.publish(on_event(GraphEvent::Move(Point::new(
+                    (self.position.x + delta_x * 5.0).min(0.0),
+                    self.position.y,
+                ))));
 
-                if state.zoom >= 0.3 && state.zoom <= 2.0 {
-                    state.zoom += delta_y;
-                    state.zoom = state.zoom.clamp(0.3, 2.0);
+                if self.zoom >= 0.3 && self.zoom <= 2.0 {
+                    self.zoom += delta_y;
+                    shell.publish(on_event(GraphEvent::Zoom(self.zoom)));
                 }
 
                 status = Status::Captured;
@@ -1291,7 +1304,7 @@ where
             }
 
             for (id, new_position) in visited.iter().zip(positions) {
-                shell.publish(on_event(GraphEvent::Move {
+                shell.publish(on_event(GraphEvent::MoveNode {
                     id: *id,
                     new_position: new_position - correction,
                     was_dragged: false,
@@ -1324,7 +1337,9 @@ pub enum GraphEvent<Attachment = RelativeAttachment>
 where
     Attachment: connections::Attachment,
 {
-    Move {
+    Move(Point),
+    Zoom(f32),
+    MoveNode {
         id: usize,
         new_position: Point,
         was_dragged: bool,
