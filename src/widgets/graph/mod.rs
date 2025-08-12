@@ -391,7 +391,14 @@ where
                             let a_size = layout
                                 .children()
                                 .nth(connection.a.0)
-                                .expect("Invalid connection")
+                                .unwrap_or_else(|| {
+                                    dbg!(&self.data);
+
+                                    panic!(
+                                        "Invalid connection: {:?}\nnode not found: {}",
+                                        connection, connection.a.0
+                                    )
+                                })
                                 .bounds()
                                 .size();
 

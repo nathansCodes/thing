@@ -1,3 +1,4 @@
+pub mod dnd;
 pub mod graph;
 
 use iced::{
