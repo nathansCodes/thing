@@ -20,7 +20,7 @@ use iced::{
     font::Weight,
     widget::{column, container, image, opaque, pane_grid, pane_grid::Configuration, text},
 };
-use iced::{Size, Subscription, Vector, keyboard};
+use iced::{Size, Subscription, Transformation, Vector, keyboard};
 use iced_aw::{menu, menu::Item, menu_bar};
 use serde::{Deserialize, Serialize};
 use std::io::ErrorKind;
@@ -40,6 +40,8 @@ fn main() -> iced::Result {
         .run_with(|| {
             (
                 State {
+                    graph_position: Vector::ZERO,
+                    graph_zoom: 1.0,
                     folder: None,
                     nodes: GraphData::default(),
                     panes: pane_grid::State::with_configuration(Configuration::Split {
@@ -76,12 +78,14 @@ enum Node {
 
 struct State {
     folder: Option<PathBuf>,
+    graph_position: Vector,
     nodes: GraphData<Node, RelativeAttachment<line_styles::AxisAligned>>,
     panes: pane_grid::State<Pane>,
     assets: assets::AssetsPane,
     focus: Option<pane_grid::Pane>,
     notifications: Vec<Notification>,
     dnd_payload: Option<Draggable>,
+    graph_zoom: f32,
 }
 
 #[derive(Default, PartialEq)]
@@ -157,6 +161,8 @@ fn view(state: &State) -> Element<'_, Message> {
         let mut content = pane_grid::Content::new(match pane {
             Pane::Graph => {
                 let graph = Graph::new(&state.nodes, view_node)
+                    .position(state.graph_position)
+                    .zoom(state.graph_zoom)
                     .on_event(Message::GraphEvent)
                     .position_nodes(position_scheme)
                     .per_node_attachments(|node| {
@@ -365,7 +371,15 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::GraphEvent(ev) => match ev {
-            GraphEvent::Move {
+            GraphEvent::Move(new_position) => {
+                state.graph_position = new_position - Point::ORIGIN;
+                Task::none()
+            }
+            GraphEvent::Zoom(zoom) => {
+                state.graph_zoom = zoom.clamp(0.3, 2.0);
+                Task::none()
+            }
+            GraphEvent::MoveNode {
                 id,
                 new_position,
                 was_dragged: _,
