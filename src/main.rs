@@ -5,6 +5,7 @@ mod style;
 mod widgets;
 
 use crate::notification::Notification;
+use crate::widgets::dnd::{dnd_indicator, dnd_receiver};
 use graph::connections::Edge;
 use graph::line_styles::AxisAligned;
 use graph::{GraphEvent, GraphNode, RelativeAttachment, line_styles};
@@ -50,6 +51,7 @@ fn main() -> iced::Result {
                     focus: None,
                     assets: AssetsPane::default(),
                     notifications: Vec::new(),
+                    dnd_payload: None,
                 },
                 Task::none(),
             )
@@ -59,6 +61,11 @@ fn main() -> iced::Result {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Image {
     path: PathBuf,
+}
+
+#[derive(Clone, Debug)]
+enum Draggable {
+    ImageAsset(PathBuf),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -74,6 +81,7 @@ struct State {
     assets: assets::AssetsPane,
     focus: Option<pane_grid::Pane>,
     notifications: Vec<Notification>,
+    dnd_payload: Option<Draggable>,
 }
 
 #[derive(Default, PartialEq)]
@@ -83,13 +91,15 @@ enum Pane {
     Graph,
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone)]
-pub enum Message {
-    AddImage(PathBuf),
+enum Message {
+    AddImage(PathBuf, Point),
     MenuButtonPressed,
     OpenAddImageDialog,
     OpenLoadFolderDialog,
     Save,
+    StartDND(Draggable),
     PaneClicked(pane_grid::Pane),
     PaneDragged(pane_grid::DragEvent),
     PaneResized(pane_grid::ResizeEvent),
@@ -107,6 +117,7 @@ pub enum Message {
     DataNotLoaded,
     Tick,
     TraverseGraph,
+    DropImageOnGraph(PathBuf, Point),
 }
 
 fn view(state: &State) -> Element<'_, Message> {
@@ -171,9 +182,17 @@ fn view(state: &State) -> Element<'_, Message> {
                 });
 
                 Element::from(
-                    container(Element::from(graph))
-                        .center_x(Fill)
-                        .center_y(Fill),
+                    container(Element::from(dnd_receiver(
+                        |payload, relative_cursor_pos| match payload {
+                            Draggable::ImageAsset(path) => {
+                                Some(Message::DropImageOnGraph(path, relative_cursor_pos))
+                            }
+                        },
+                        state.dnd_payload.clone(),
+                        graph,
+                    )))
+                    .center_x(Fill)
+                    .center_y(Fill),
                 )
             }
             Pane::Assets => container(assets::view(&state.assets).map(Message::AssetsMessage))
@@ -222,12 +241,30 @@ fn view(state: &State) -> Element<'_, Message> {
         )
     ];
 
-    column![menu_bar, stack![container(grid), notifications]].into()
+    column![
+        menu_bar,
+        stack![
+            dnd_indicator(
+                state.dnd_payload.clone().map(|draggable| match draggable {
+                    Draggable::ImageAsset(img_path) => container(
+                        image(img_path.to_string_lossy().to_string())
+                            .width(50.0)
+                            .opacity(0.5)
+                    )
+                    .width(50.0)
+                    .into(),
+                }),
+                container(grid)
+            ),
+            notifications
+        ]
+    ]
+    .into()
 }
 
 fn update(state: &mut State, message: Message) -> Task<Message> {
     match message {
-        Message::AddImage(path) => {
+        Message::AddImage(path, pos) => {
             if !path.exists() {
                 Task::done(Message::AddImageFailed(IOError::IO(
                     std::io::ErrorKind::NotFound,
@@ -235,7 +272,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             } else {
                 state
                     .nodes
-                    .add(Node::Character(Image { path: path.clone() }), Point::ORIGIN);
+                    .add(Node::Character(Image { path: path.clone() }), pos);
 
                 Task::none()
             }
@@ -262,7 +299,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::PaneDragged(_) => Task::none(),
         Message::OpenAddImageDialog => Task::perform(pick_file(), |path_maybe| match path_maybe {
-            Ok(path) => Message::AddImage(path),
+            Ok(path) => Message::AddImage(path, Point::ORIGIN),
             Err(err) => Message::AddImageFailed(err),
         }),
         Message::OpenLoadFolderDialog => {
@@ -277,7 +314,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::AssetsMessage(assets_message) => match assets_message {
             AssetsMessage::OpenAsset(asset_type, path) => match asset_type {
-                AssetType::Image => Task::done(Message::AddImage(path)),
+                AssetType::Image => Task::done(Message::AddImage(path, Point::ORIGIN)),
             },
             AssetsMessage::LoadAssets(path) => {
                 state.folder = Some(path.clone());
@@ -286,6 +323,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             AssetsMessage::LoadCompleted(_) | AssetsMessage::LoadFailed(_) => {
                 assets::update(&mut state.assets, assets_message).map(Message::AssetsMessage)
+            }
+            AssetsMessage::AssetDragged(AssetType::Image, path) => {
+                Task::done(Message::StartDND(Draggable::ImageAsset(path)))
             }
         },
         Message::LoadData(path) => Task::batch([
@@ -485,6 +525,14 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 .iter_bfs(0)
                 .for_each(|(i, node)| println!("for_each {i}: {:?}", node.data()));
             Task::none()
+        }
+        Message::StartDND(draggable) => {
+            state.dnd_payload = Some(draggable);
+            Task::none()
+        }
+        Message::DropImageOnGraph(path, cursor_pos) => {
+            state.dnd_payload = None;
+            Task::done(Message::AddImage(path, cursor_pos))
         }
     }
 }

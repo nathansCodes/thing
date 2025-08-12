@@ -8,7 +8,7 @@ use iced::{
     widget::{column, container, image, mouse_area, row, scrollable, text},
 };
 
-use crate::io::IOError;
+use crate::{io::IOError, widgets::dnd::dnd_provider};
 
 #[derive(Default, Debug, Clone, Copy)]
 pub enum AssetType {
@@ -70,6 +70,9 @@ pub fn update(state: &mut AssetsPane, message: AssetsMessage) -> Task<AssetsMess
         AssetsMessage::OpenAsset(asset_type, path) => {
             Task::done(AssetsMessage::OpenAsset(asset_type, path))
         }
+        AssetsMessage::AssetDragged(asset_type, path) => {
+            Task::done(AssetsMessage::AssetDragged(asset_type, path))
+        }
     }
 }
 
@@ -77,25 +80,28 @@ pub fn view(state: &AssetsPane) -> Element<AssetsMessage> {
     match state.view {
         AssetType::Image => scrollable(
             row(state.files.iter().map(|path| {
-                let img = mouse_area(container(
-                    column![
-                        image(path)
-                            .height(100.0)
+                let img = dnd_provider(
+                    AssetsMessage::AssetDragged(AssetType::Image, path.clone()),
+                    mouse_area(container(
+                        column![
+                            image(path)
+                                .height(100.0)
+                                .width(100.0)
+                                .filter_method(image::FilterMethod::Nearest),
+                            text(
+                                path.file_name()
+                                    .map(|os_str| os_str.to_string_lossy())
+                                    .unwrap_or("abcd".into()),
+                            )
                             .width(100.0)
-                            .filter_method(image::FilterMethod::Nearest),
-                        text(
-                            path.file_name()
-                                .map(|os_str| os_str.to_string_lossy())
-                                .unwrap_or("abcd".into()),
-                        )
-                        .width(100.0)
-                        .center()
-                    ]
-                    .spacing(5.0)
-                    .padding(5.0),
-                ))
-                .on_release(AssetsMessage::OpenAsset(state.view, path.clone()))
-                .interaction(Interaction::Pointer);
+                            .center()
+                        ]
+                        .spacing(5.0)
+                        .padding(5.0),
+                    ))
+                    .on_release(AssetsMessage::OpenAsset(state.view, path.clone()))
+                    .interaction(Interaction::Pointer),
+                );
                 Element::from(img)
             }))
             .spacing(5.0)
@@ -122,4 +128,5 @@ pub enum AssetsMessage {
     LoadCompleted(Vec<PathBuf>),
     LoadFailed(IOError),
     OpenAsset(AssetType, PathBuf),
+    AssetDragged(AssetType, PathBuf),
 }
