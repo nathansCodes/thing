@@ -1129,7 +1129,7 @@ where
                 };
 
                 shell.publish(on_event(GraphEvent::Move(Point::new(
-                    (self.position.x + delta_x * 5.0).min(0.0),
+                    (self.position.x + delta_x * 5.0).min(0.0) / self.zoom,
                     self.position.y,
                 ))));
 
