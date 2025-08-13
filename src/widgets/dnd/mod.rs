@@ -23,17 +23,20 @@ where
     })
 }
 
-pub fn dnd_provider<'a, Message, Theme, Renderer>(
-    start_dragging: Message,
+pub fn dnd_provider<'a, Payload, Message, Theme, Renderer>(
+    set_payload: impl Fn(Option<Payload>) -> Message + 'a,
+    payload: Payload,
     content: impl Into<Element<'a, Message, Theme, Renderer>>,
 ) -> Element<'a, Message, Theme, Renderer>
 where
+    Payload: Clone + 'a,
     Message: Clone + 'a,
     Renderer: iced::advanced::image::Renderer + iced::advanced::graphics::geometry::Renderer + 'a,
     Theme: 'a,
 {
     DragAndDropProvider {
-        start_dragging,
+        set_payload: Box::new(set_payload),
+        payload,
         content: content.into(),
     }
     .into()

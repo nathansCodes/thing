@@ -35,62 +35,6 @@ where
         self.content.as_widget().size()
     }
 
-    fn children(&self) -> Vec<Tree> {
-        vec![Tree::new(&self.content)]
-    }
-
-    fn diff(&self, tree: &mut Tree) {
-        tree.diff_children(&[&self.content]);
-    }
-
-    fn operate(
-        &self,
-        tree: &mut Tree,
-        layout: Layout<'_>,
-        renderer: &Renderer,
-        operation: &mut dyn iced::advanced::widget::Operation,
-    ) {
-        self.content.as_widget().operate(
-            &mut tree.children[0],
-            layout.children().next().unwrap(),
-            renderer,
-            operation,
-        );
-    }
-
-    fn overlay<'b>(
-        &'b mut self,
-        tree: &'b mut Tree,
-        layout: Layout<'_>,
-        renderer: &Renderer,
-        translation: Vector,
-    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
-        self.content.as_widget_mut().overlay(
-            &mut tree.children[0],
-            layout.children().next().unwrap(),
-            renderer,
-            translation,
-        )
-    }
-
-    fn mouse_interaction(
-        &self,
-        _state: &Tree,
-        layout: Layout<'_>,
-        cursor: iced::advanced::mouse::Cursor,
-        _viewport: &Rectangle,
-        _renderer: &Renderer,
-    ) -> iced::advanced::mouse::Interaction {
-        if let Some(relative_cursor_pos) = cursor.position_in(layout.bounds())
-            && let Some(payload) = self.payload.clone()
-            && (self.receive)(payload, relative_cursor_pos).is_none()
-        {
-            Interaction::NotAllowed
-        } else {
-            Interaction::None
-        }
-    }
-
     fn layout(&self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) -> Node {
         let content_layout =
             self.content
@@ -124,6 +68,29 @@ where
             layout.children().next().unwrap(),
             cursor,
             &layout.bounds(),
+        );
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::new(&self.content)]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(&[&self.content]);
+    }
+
+    fn operate(
+        &self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn iced::advanced::widget::Operation,
+    ) {
+        self.content.as_widget().operate(
+            &mut tree.children[0],
+            layout.children().next().unwrap(),
+            renderer,
+            operation,
         );
     }
 
@@ -164,6 +131,39 @@ where
             }
             _ => Status::Ignored,
         }
+    }
+
+    fn mouse_interaction(
+        &self,
+        _state: &Tree,
+        layout: Layout<'_>,
+        cursor: iced::advanced::mouse::Cursor,
+        _viewport: &Rectangle,
+        _renderer: &Renderer,
+    ) -> iced::advanced::mouse::Interaction {
+        if let Some(relative_cursor_pos) = cursor.position_in(layout.bounds())
+            && let Some(payload) = self.payload.clone()
+            && (self.receive)(payload, relative_cursor_pos).is_none()
+        {
+            Interaction::NotAllowed
+        } else {
+            Interaction::None
+        }
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout.children().next().unwrap(),
+            renderer,
+            translation,
+        )
     }
 }
 
