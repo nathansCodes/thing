@@ -1,1 +1,19 @@
 /target
+
+# fuck vibe coders, fuck ai
+/.curosr
+/.github/copilot*
+/.kiro
+/.windsurf
+/.codex
+/.instrucions.md
+/.prompt
+/.rules
+/AGENT.md
+/AGENTS.md
+/CLAUDE.md
+/CONVENTIONS.md
+/global_rules.md
+/.windsurfrules
+!/src/*mcp*
+*mcp*
