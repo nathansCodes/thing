@@ -1128,10 +1128,12 @@ where
                     ScrollDelta::Pixels { x, y } => (x, y * 0.05),
                 };
 
-                shell.publish(on_event(GraphEvent::Move(Point::new(
-                    (self.position.x + delta_x * 5.0).min(0.0) / self.zoom,
-                    self.position.y,
-                ))));
+                if delta_x != 0.0 {
+                    shell.publish(on_event(GraphEvent::Move(Point::new(
+                        (self.position.x + delta_x * 5.0 / self.zoom).min(0.0),
+                        self.position.y,
+                    ))));
+                }
 
                 if self.zoom >= 0.3 && self.zoom <= 2.0 {
                     self.zoom += delta_y;
