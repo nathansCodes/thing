@@ -103,7 +103,6 @@ enum Message {
     OpenAddImageDialog,
     OpenLoadFolderDialog,
     Save,
-    StartDND(Draggable),
     PaneClicked(pane_grid::Pane),
     PaneDragged(pane_grid::DragEvent),
     PaneResized(pane_grid::ResizeEvent),
@@ -121,6 +120,7 @@ enum Message {
     DataNotLoaded,
     Tick,
     TraverseGraph,
+    SetDragPayload(Option<Draggable>),
     DropImageOnGraph(PathBuf, Point),
 }
 
@@ -330,9 +330,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             AssetsMessage::LoadCompleted(_) | AssetsMessage::LoadFailed(_) => {
                 assets::update(&mut state.assets, assets_message).map(Message::AssetsMessage)
             }
-            AssetsMessage::AssetDragged(AssetType::Image, path) => {
-                Task::done(Message::StartDND(Draggable::ImageAsset(path)))
-            }
+            AssetsMessage::SetPayload(payload) => Task::done(Message::SetDragPayload(payload)),
         },
         Message::LoadData(path) => Task::batch([
             Task::done(Message::AssetsMessage(AssetsMessage::LoadAssets(
@@ -540,13 +538,19 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 .for_each(|(i, node)| println!("for_each {i}: {:?}", node.data()));
             Task::none()
         }
-        Message::StartDND(draggable) => {
-            state.dnd_payload = Some(draggable);
+        Message::SetDragPayload(draggable) => {
+            if !(state.dnd_payload.is_some() && draggable.is_some()) {
+                state.dnd_payload = draggable;
+            }
             Task::none()
         }
-        Message::DropImageOnGraph(path, cursor_pos) => {
+        Message::DropImageOnGraph(path, relative_cursor_pos) => {
             state.dnd_payload = None;
-            Task::done(Message::AddImage(path, cursor_pos))
+            Task::done(Message::AddImage(
+                path,
+                relative_cursor_pos * Transformation::scale(1.0 / state.graph_zoom)
+                    - state.graph_position,
+            ))
         }
     }
 }

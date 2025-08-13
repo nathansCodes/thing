@@ -70,9 +70,7 @@ pub fn update(state: &mut AssetsPane, message: AssetsMessage) -> Task<AssetsMess
         AssetsMessage::OpenAsset(asset_type, path) => {
             Task::done(AssetsMessage::OpenAsset(asset_type, path))
         }
-        AssetsMessage::AssetDragged(asset_type, path) => {
-            Task::done(AssetsMessage::AssetDragged(asset_type, path))
-        }
+        AssetsMessage::SetPayload(payload) => Task::done(AssetsMessage::SetPayload(payload)),
     }
 }
 
@@ -81,7 +79,8 @@ pub fn view(state: &AssetsPane) -> Element<AssetsMessage> {
         AssetType::Image => scrollable(
             row(state.files.iter().map(|path| {
                 let img = dnd_provider(
-                    AssetsMessage::AssetDragged(AssetType::Image, path.clone()),
+                    AssetsMessage::SetPayload,
+                    crate::Draggable::ImageAsset(path.clone()),
                     mouse_area(container(
                         column![
                             image(path)
@@ -128,5 +127,5 @@ pub enum AssetsMessage {
     LoadCompleted(Vec<PathBuf>),
     LoadFailed(IOError),
     OpenAsset(AssetType, PathBuf),
-    AssetDragged(AssetType, PathBuf),
+    SetPayload(Option<crate::Draggable>),
 }

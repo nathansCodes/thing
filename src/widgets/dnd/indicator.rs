@@ -1,5 +1,5 @@
 use iced::{
-    Element, Event, Length, Point, Rectangle, Size, Vector,
+    Element, Event, Length, Point, Rectangle, Size,
     advanced::{
         Clipboard, Layout, Shell, Widget,
         graphics::core::event::Status,
@@ -27,26 +27,8 @@ impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
 where
     Renderer: iced::advanced::image::Renderer + iced::advanced::graphics::geometry::Renderer,
 {
-    fn state(&self) -> State {
-        State::Some(Box::new(Point::ORIGIN))
-    }
-
-    fn tag(&self) -> Tag {
-        Tag::of::<Point>()
-    }
-
     fn size(&self) -> Size<Length> {
         self.content.as_widget().size()
-    }
-
-    fn children(&self) -> Vec<Tree> {
-        let mut children = vec![Tree::new(&self.content)];
-
-        if let Some(payload_element) = &self.payload_element {
-            children.push(Tree::new(payload_element));
-        }
-
-        children
     }
 
     fn layout(&self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) -> Node {
@@ -62,7 +44,7 @@ where
                 payload_element
                     .as_widget()
                     .layout(&mut tree.children[0], renderer, limits)
-                    .move_to(*tree.state.downcast_ref::<Point>() + Vector::new(5.0, 5.0)),
+                    .move_to(*tree.state.downcast_ref::<Point>()),
             );
         }
 
@@ -102,6 +84,49 @@ where
                 );
             });
         }
+    }
+
+    fn tag(&self) -> Tag {
+        Tag::of::<Point>()
+    }
+
+    fn state(&self) -> State {
+        State::Some(Box::new(Point::ORIGIN))
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        let mut children = vec![Tree::new(&self.content)];
+
+        if let Some(payload_element) = &self.payload_element {
+            children.push(Tree::new(payload_element));
+        }
+
+        children
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        let mut children = vec![self.content.as_widget()];
+
+        if let Some(payload_element) = &self.payload_element {
+            children.push(payload_element.as_widget());
+        }
+
+        tree.diff_children(&children);
+    }
+
+    fn operate(
+        &self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn iced::advanced::widget::Operation,
+    ) {
+        self.content.as_widget().operate(
+            &mut tree.children[0],
+            layout.children().next().unwrap(),
+            renderer,
+            operation,
+        );
     }
 
     fn on_event(
@@ -159,31 +184,6 @@ where
                 renderer,
             )
         }
-    }
-
-    fn diff(&self, tree: &mut Tree) {
-        let mut children = vec![self.content.as_widget()];
-
-        if let Some(payload_element) = &self.payload_element {
-            children.push(payload_element.as_widget());
-        }
-
-        tree.diff_children(&children);
-    }
-
-    fn operate(
-        &self,
-        tree: &mut Tree,
-        layout: Layout<'_>,
-        renderer: &Renderer,
-        operation: &mut dyn iced::advanced::widget::Operation,
-    ) {
-        self.content.as_widget().operate(
-            &mut tree.children[0],
-            layout.children().next().unwrap(),
-            renderer,
-            operation,
-        );
     }
 
     fn overlay<'b>(
