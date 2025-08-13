@@ -13,9 +13,14 @@ use iced::{
     mouse,
 };
 
-pub(super) struct DragAndDropProvider<'a, Message: Clone, Theme, Renderer> {
-    pub(super) start_dragging: Message,
+pub(super) struct DragAndDropProvider<'a, Payload, Message, Theme, Renderer>
+where
+    Payload: Clone + 'a,
+    Message: Clone + 'a,
+{
+    pub(super) set_payload: Box<dyn Fn(Option<Payload>) -> Message + 'a>,
     pub(super) content: Element<'a, Message, Theme, Renderer>,
+    pub(super) payload: Payload,
 }
 
 #[derive(Default)]
@@ -24,26 +29,15 @@ struct DragAndDropProviderState {
     is_hovered: bool,
 }
 
-impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for DragAndDropProvider<'a, Message, Theme, Renderer>
+impl<'a, Payload, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for DragAndDropProvider<'a, Payload, Message, Theme, Renderer>
 where
-    Message: Clone,
+    Payload: Clone + 'a,
+    Message: Clone + 'a,
     Renderer: iced::advanced::image::Renderer + iced::advanced::graphics::geometry::Renderer,
 {
-    fn state(&self) -> State {
-        State::Some(Box::new(DragAndDropProviderState::default()))
-    }
-
-    fn tag(&self) -> iced::advanced::widget::tree::Tag {
-        Tag::of::<DragAndDropProviderState>()
-    }
-
     fn size(&self) -> Size<Length> {
         self.content.as_widget().size()
-    }
-
-    fn children(&self) -> Vec<Tree> {
-        vec![Tree::new(&self.content)]
     }
 
     fn layout(&self, tree: &mut Tree, renderer: &Renderer, limits: &Limits) -> Node {
@@ -82,62 +76,16 @@ where
         );
     }
 
-    fn on_event(
-        &mut self,
-        tree: &mut Tree,
-        event: Event,
-        layout: Layout<'_>,
-        cursor: Cursor,
-        renderer: &Renderer,
-        clipboard: &mut dyn Clipboard,
-        shell: &mut Shell<'_, Message>,
-        viewport: &Rectangle,
-    ) -> Status {
-        if let Status::Captured = self.content.as_widget_mut().on_event(
-            &mut tree.children[0],
-            event.clone(),
-            layout.children().next().unwrap(),
-            cursor,
-            renderer,
-            clipboard,
-            shell,
-            viewport,
-        ) {
-            return Status::Captured;
-        }
+    fn tag(&self) -> iced::advanced::widget::tree::Tag {
+        Tag::of::<DragAndDropProviderState>()
+    }
 
-        let state = tree.state.downcast_mut::<DragAndDropProviderState>();
+    fn state(&self) -> State {
+        State::Some(Box::new(DragAndDropProviderState::default()))
+    }
 
-        if let Event::Mouse(ev) = event {
-            match ev {
-                mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                    state.lmb_pressed = true;
-                    Status::Captured
-                }
-                mouse::Event::ButtonReleased(mouse::Button::Left) => {
-                    state.lmb_pressed = false;
-                    Status::Captured
-                }
-                mouse::Event::CursorMoved { position } => {
-                    let was_hovered = state.is_hovered;
-                    state.is_hovered = layout
-                        .children()
-                        .next()
-                        .unwrap()
-                        .bounds()
-                        .contains(position);
-
-                    if was_hovered && !state.is_hovered && state.lmb_pressed {
-                        shell.publish(self.start_dragging.clone());
-                    }
-
-                    Status::Captured
-                }
-                _ => Status::Ignored,
-            }
-        } else {
-            Status::Ignored
-        }
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::new(&self.content)]
     }
 
     fn diff(&self, tree: &mut Tree) {
@@ -159,6 +107,68 @@ where
         );
     }
 
+    fn on_event(
+        &mut self,
+        tree: &mut Tree,
+        event: Event,
+        layout: Layout<'_>,
+        cursor: Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) -> Status {
+        let state = tree.state.downcast_mut::<DragAndDropProviderState>();
+
+        if !(state.is_hovered
+            && event == Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)))
+            && let Status::Captured = self.content.as_widget_mut().on_event(
+                &mut tree.children[0],
+                event.clone(),
+                layout.children().next().unwrap(),
+                cursor,
+                renderer,
+                clipboard,
+                shell,
+                viewport,
+            )
+        {
+            return Status::Captured;
+        }
+
+        if let Event::Mouse(ev) = event {
+            match ev {
+                mouse::Event::ButtonPressed(mouse::Button::Left) => {
+                    state.lmb_pressed = state.is_hovered;
+                    Status::Captured
+                }
+                mouse::Event::ButtonReleased(mouse::Button::Left) => {
+                    shell.publish((self.set_payload)(None));
+                    state.lmb_pressed = false;
+                    Status::Captured
+                }
+                mouse::Event::CursorMoved { position } => {
+                    let was_hovered = state.is_hovered;
+                    state.is_hovered = layout
+                        .children()
+                        .next()
+                        .unwrap()
+                        .bounds()
+                        .contains(position);
+
+                    if was_hovered && !state.is_hovered && state.lmb_pressed {
+                        shell.publish((self.set_payload)(Some(self.payload.clone())));
+                    }
+
+                    Status::Captured
+                }
+                _ => Status::Ignored,
+            }
+        } else {
+            Status::Ignored
+        }
+    }
+
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut Tree,
@@ -175,14 +185,16 @@ where
     }
 }
 
-impl<'a, Message, Theme, Renderer> From<DragAndDropProvider<'a, Message, Theme, Renderer>>
+impl<'a, Payload, Message, Theme, Renderer>
+    From<DragAndDropProvider<'a, Payload, Message, Theme, Renderer>>
     for Element<'a, Message, Theme, Renderer>
 where
+    Payload: Clone + 'a,
     Message: Clone + 'a,
     Theme: 'a,
     Renderer: iced::advanced::image::Renderer + iced::advanced::graphics::geometry::Renderer + 'a,
 {
-    fn from(value: DragAndDropProvider<'a, Message, Theme, Renderer>) -> Self {
+    fn from(value: DragAndDropProvider<'a, Payload, Message, Theme, Renderer>) -> Self {
         Element::new(value)
     }
 }
