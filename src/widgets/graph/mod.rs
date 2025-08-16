@@ -334,6 +334,315 @@ where
                     .unwrap_or(Payload::Background)
             })
     }
+
+    fn on_cursor_moved(
+        &self,
+        cursor_pos: Point,
+        state: &mut GraphState<Attachment>,
+        mut new_payload: Payload<Attachment>,
+        shell: &mut Shell<'_, Message>,
+        layout: &Layout<'_>,
+    ) -> Status {
+        let Some(on_event) = &self.on_event else {
+            return Status::Ignored;
+        };
+
+        state.cursor_pos = cursor_pos;
+
+        match &state.cursor_state {
+            CursorState::Dragging(payload) => match payload {
+                Payload::Background => {
+                    let mut new_position = state.drag_origin
+                        + (cursor_pos - state.drag_start_point)
+                            * Transformation::scale(1.0 / self.zoom);
+
+                    // limiting the position to negative values cause the
+                    // renderer doesn't render elements with negative positions properly
+                    new_position.x = new_position.x.min(0.0);
+                    new_position.y = new_position.y.min(0.0);
+
+                    shell.publish(on_event(GraphEvent::Move(new_position)));
+                    shell.invalidate_layout();
+                }
+                Payload::Node(id, status) => {
+                    if status == &Status::Ignored
+                        && let Some(on_event) = &self.on_event
+                        && self.node_positioning.is_none()
+                    {
+                        let mut new_position = state.drag_origin
+                            + (cursor_pos - state.drag_start_point)
+                                * Transformation::scale(1.0 / self.zoom);
+
+                        // same reason as before except that i limit it to positive values for some
+                        // reason
+                        new_position.x = new_position.x.max(0.0);
+                        new_position.y = new_position.y.max(0.0);
+
+                        // un-select other nodes if current one isn't part of the selection
+                        if !state.selection.contains(id) {
+                            state.selection.clear();
+                        }
+
+                        // make sure no nodes get negative positions
+                        let mut correction = Vector::ZERO;
+
+                        let selections_positions: Vec<_> = state
+                            .selection
+                            .iter()
+                            .filter_map(|selected: &usize| {
+                                if selected == id {
+                                    return None;
+                                }
+
+                                let node = &self.data.nodes[*selected];
+
+                                let new_position =
+                                    node.position + (new_position - self.data.nodes[*id].position);
+
+                                if new_position.x < 0.0 {
+                                    correction.x = correction.x.max(-new_position.x);
+                                }
+                                if new_position.y < 0.0 {
+                                    correction.y = correction.y.max(-new_position.y);
+                                }
+
+                                Some((*selected, new_position))
+                            })
+                            .collect();
+
+                        shell.publish(on_event(GraphEvent::MoveNode {
+                            id: *id,
+                            new_position: new_position + correction,
+                            was_dragged: true,
+                        }));
+
+                        selections_positions.iter().for_each(|(id, new_position)| {
+                            shell.publish(on_event(GraphEvent::MoveNode {
+                                id: *id,
+                                new_position: *new_position + correction,
+                                was_dragged: true,
+                            }));
+                        });
+                    }
+                }
+                Payload::Attachment(_, _) => {}
+                Payload::Connection(_) => {}
+                Payload::SelectionRect => {}
+            },
+            CursorState::Hovering(payload) => match payload {
+                Payload::Background => {
+                    state.drag_origin.x = self.position.x;
+                    state.drag_origin.y = self.position.y;
+                    state.drag_start_point = cursor_pos;
+                    state.cursor_state = if state.pressed_mb == Some(Button::Middle) {
+                        CursorState::Dragging(new_payload)
+                    } else if state.pressed_mb == Some(Button::Left) {
+                        CursorState::Dragging(Payload::SelectionRect)
+                    } else {
+                        CursorState::Hovering(new_payload)
+                    };
+                }
+                Payload::Node(id, status) => {
+                    state.drag_origin = self.data.nodes[*id].position;
+                    state.drag_start_point = cursor_pos;
+
+                    if status == &Status::Captured {
+                        new_payload = Payload::Node(*id, Status::Captured);
+                    }
+
+                    let mmb_or_shift_lmb_pressed = state.pressed_mb == Some(Button::Middle)
+                        || state.pressed_mb == Some(Button::Left) && state.shift_pressed;
+
+                    if status == &Status::Ignored
+                        && mmb_or_shift_lmb_pressed
+                        && self.node_positioning.is_none()
+                    {
+                        state.cursor_state = CursorState::Dragging(new_payload);
+                    } else {
+                        state.cursor_state = CursorState::Hovering(new_payload);
+                    };
+                }
+                Payload::Attachment(id, _) => {
+                    state.drag_origin = self.data.nodes[*id].position;
+                    state.drag_start_point = cursor_pos;
+                    state.cursor_state = if state.pressed_mb == Some(Button::Left) {
+                        CursorState::Dragging(new_payload)
+                    } else {
+                        CursorState::Hovering(new_payload)
+                    };
+                }
+                Payload::Connection(connection) if state.pressed_mb == Some(Button::Left) => {
+                    if let Some(on_event) = &self.on_event {
+                        shell.publish(on_event(GraphEvent::Disconnect {
+                            connection_id: *connection,
+                        }));
+                    }
+
+                    let connection = self
+                        .data
+                        .connections
+                        .get(*connection)
+                        .expect("Invalid connection");
+
+                    let a = self.data.get(connection.a.0).unwrap();
+                    let b = self.data.get(connection.b.0).unwrap();
+
+                    let a_size = layout
+                        .children()
+                        .nth(connection.a.0)
+                        .expect("Invalid connection")
+                        .bounds()
+                        .size();
+
+                    let b_size = layout
+                        .children()
+                        .nth(connection.b.0)
+                        .expect("Invalid connection")
+                        .bounds()
+                        .size();
+
+                    let a_attachment = connection.a.1.clone();
+                    let b_attachment = connection.b.1.clone();
+
+                    let a_att_pos = a_attachment.resolve(a_size, a.position + self.position);
+                    let b_att_pos = b_attachment.resolve(b_size, b.position + self.position);
+
+                    let cursor_pos =
+                        cursor_pos - Vector::new(layout.position().x, layout.position().y);
+
+                    let delta_to_a = a_att_pos.distance(cursor_pos);
+                    let delta_to_b = b_att_pos.distance(cursor_pos);
+
+                    let new_payload = if delta_to_a < delta_to_b {
+                        Payload::Attachment(connection.b.0, b_attachment)
+                    } else {
+                        Payload::Attachment(connection.a.0, a_attachment)
+                    };
+
+                    state.cursor_state = CursorState::Dragging(new_payload);
+                }
+                Payload::Connection(_) => {
+                    state.cursor_state = CursorState::Hovering(new_payload);
+                }
+                Payload::SelectionRect => unreachable!(),
+            },
+        }
+
+        Status::Captured
+    }
+
+    fn on_mouse_button_released(
+        &self,
+        btn: mouse::Button,
+        state: &mut GraphState<Attachment>,
+        new_payload: Payload<Attachment>,
+        shell: &mut Shell<'_, Message>,
+        layout: Layout<'_>,
+        status: Status,
+    ) -> Status {
+        // i love you rust
+        let (Button::Left | Button::Middle) = btn else {
+            return Status::Ignored;
+        };
+
+        state.pressed_mb = None;
+
+        match &state.cursor_state {
+            CursorState::Dragging(Payload::Attachment(a, a_attachment)) => {
+                if let Some(on_event) = &self.on_event {
+                    if let Payload::Attachment(b, b_attachment) = new_payload.clone() {
+                        let mut allowed = true;
+
+                        if !self.allow_self_connections && *a == b {
+                            allowed = false;
+                        }
+
+                        if !self.allow_similar_connections
+                            && let Some((connection_id, _)) =
+                                self.data.connections.iter().enumerate().find(|(_, conn)| {
+                                    (conn.a.0 == *a && conn.b.0 == b)
+                                        || (conn.a.0 == b && conn.b.0 == *a)
+                                })
+                        {
+                            shell.publish(on_event(GraphEvent::Disconnect { connection_id }));
+                        }
+
+                        if allowed {
+                            shell.publish(on_event(GraphEvent::Connect {
+                                a: *a,
+                                a_attachment: a_attachment.clone(),
+                                b,
+                                b_attachment,
+                            }));
+                        }
+                    } else if matches!(new_payload, Payload::Background) {
+                        shell.publish(on_event(GraphEvent::ConnectionDropped {
+                            id: *a,
+                            attachment: a_attachment.clone(),
+                        }))
+                    }
+                }
+            }
+            CursorState::Dragging(Payload::SelectionRect) => {
+                let mut top_left = state.drag_start_point;
+                let mut bottom_right = state.cursor_pos;
+
+                if bottom_right.x < top_left.x {
+                    std::mem::swap(&mut top_left.x, &mut bottom_right.x);
+                }
+                if bottom_right.y < top_left.y {
+                    std::mem::swap(&mut top_left.y, &mut bottom_right.y);
+                }
+
+                let rect = Rectangle::new(top_left, (bottom_right - top_left).into());
+
+                let mut selected: Vec<_> = layout
+                    .children()
+                    .zip(self.data.nodes.iter())
+                    .enumerate()
+                    .filter_map(|(i, (child, node))| {
+                        rect.intersects(&transform_node_bounds(
+                            child.bounds(),
+                            self.zoom,
+                            self.position,
+                            node.position,
+                        ))
+                        .then_some(i)
+                    })
+                    .collect();
+
+                if state.shift_pressed {
+                    state.selection.append(&mut selected);
+
+                    // remove duplicates
+                    state.selection.sort();
+                    state.selection.dedup();
+                } else {
+                    state.selection = selected;
+                }
+            }
+            CursorState::Hovering(Payload::Node(id, old_status))
+                if old_status == &Status::Ignored && status == Status::Ignored =>
+            {
+                if !state.shift_pressed {
+                    state.selection.clear();
+                }
+                if let Some(index) = state.selection.iter().position(|s| s == id) {
+                    state.selection.remove(index);
+                } else {
+                    state.selection.push(*id);
+                }
+            }
+            CursorState::Hovering(Payload::Background) => {
+                state.selection.clear();
+            }
+            _ => (),
+        }
+
+        state.cursor_state = CursorState::Hovering(new_payload);
+
+        Status::Captured
+    }
 }
 
 impl<'a, Message, Renderer, Data, Attachment> Widget<Message, Theme, Renderer>
@@ -787,7 +1096,7 @@ where
 
         let mut status = Status::Ignored;
 
-        let mut new_payload = self.get_payload(
+        let new_payload = self.get_payload(
             &layout,
             &mut tree.children,
             cursor,
@@ -802,325 +1111,39 @@ where
             return Status::Ignored;
         };
 
-        match event {
+        let new_status: Status = match event {
             Event::Touch(ev) => {
                 dbg!(ev);
+                Status::Ignored
             }
             Event::Mouse(mouse::Event::CursorMoved {
                 position: cursor_pos,
-            }) => {
-                state.cursor_pos = cursor_pos;
-
-                match &state.cursor_state {
-                    CursorState::Dragging(payload) => match payload {
-                        Payload::Background => {
-                            let mut new_position = state.drag_origin
-                                + (cursor_pos - state.drag_start_point)
-                                    * Transformation::scale(1.0 / self.zoom);
-
-                            // limiting the position to negative values cause the
-                            // renderer doesn't render elements with negative positions properly
-                            new_position.x = new_position.x.min(0.0);
-                            new_position.y = new_position.y.min(0.0);
-
-                            shell.publish(on_event(GraphEvent::Move(new_position)));
-                            shell.invalidate_layout();
-                        }
-                        Payload::Node(id, status) => {
-                            if status == &Status::Ignored
-                                && let Some(on_event) = &self.on_event
-                                && self.node_positioning.is_none()
-                            {
-                                let mut new_position = state.drag_origin
-                                    + (cursor_pos - state.drag_start_point)
-                                        * Transformation::scale(1.0 / self.zoom);
-
-                                // same reason as before except that i limit it to positive values for some
-                                // reason
-                                new_position.x = new_position.x.max(0.0);
-                                new_position.y = new_position.y.max(0.0);
-
-                                // un-select other nodes if current one isn't part of the selection
-                                if !state.selection.contains(id) {
-                                    state.selection.clear();
-                                }
-
-                                // make sure no nodes get negative positions
-                                let mut correction = Vector::ZERO;
-
-                                let selections_positions: Vec<_> = state
-                                    .selection
-                                    .iter()
-                                    .filter_map(|selected: &usize| {
-                                        if selected == id {
-                                            return None;
-                                        }
-
-                                        let node = &self.data.nodes[*selected];
-
-                                        let new_position = node.position
-                                            + (new_position - self.data.nodes[*id].position);
-
-                                        if new_position.x < 0.0 {
-                                            correction.x = correction.x.max(-new_position.x);
-                                        }
-                                        if new_position.y < 0.0 {
-                                            correction.y = correction.y.max(-new_position.y);
-                                        }
-
-                                        Some((*selected, new_position))
-                                    })
-                                    .collect();
-
-                                shell.publish(on_event(GraphEvent::MoveNode {
-                                    id: *id,
-                                    new_position: new_position + correction,
-                                    was_dragged: true,
-                                }));
-
-                                selections_positions.iter().for_each(|(id, new_position)| {
-                                    shell.publish(on_event(GraphEvent::MoveNode {
-                                        id: *id,
-                                        new_position: *new_position + correction,
-                                        was_dragged: true,
-                                    }));
-                                });
-                            }
-                        }
-                        Payload::Attachment(_, _) => {}
-                        Payload::Connection(_) => {}
-                        Payload::SelectionRect => {}
-                    },
-                    CursorState::Hovering(payload) => match payload {
-                        Payload::Background => {
-                            state.drag_origin.x = self.position.x;
-                            state.drag_origin.y = self.position.y;
-                            state.drag_start_point = cursor_pos;
-                            state.cursor_state = if state.pressed_mb == Some(Button::Middle) {
-                                CursorState::Dragging(new_payload)
-                            } else if state.pressed_mb == Some(Button::Left) {
-                                CursorState::Dragging(Payload::SelectionRect)
-                            } else {
-                                CursorState::Hovering(new_payload)
-                            };
-                        }
-                        Payload::Node(id, status) => {
-                            state.drag_origin = self.data.nodes[*id].position;
-                            state.drag_start_point = cursor_pos;
-
-                            if status == &Status::Captured {
-                                new_payload = Payload::Node(*id, Status::Captured);
-                            }
-
-                            let mmb_or_shift_lmb_pressed = state.pressed_mb == Some(Button::Middle)
-                                || state.pressed_mb == Some(Button::Left) && state.shift_pressed;
-
-                            if status == &Status::Ignored
-                                && mmb_or_shift_lmb_pressed
-                                && self.node_positioning.is_none()
-                            {
-                                state.cursor_state = CursorState::Dragging(new_payload);
-                            } else {
-                                state.cursor_state = CursorState::Hovering(new_payload);
-                            };
-                        }
-                        Payload::Attachment(id, _) => {
-                            state.drag_origin = self.data.nodes[*id].position;
-                            state.drag_start_point = cursor_pos;
-                            state.cursor_state = if state.pressed_mb == Some(Button::Left) {
-                                CursorState::Dragging(new_payload)
-                            } else {
-                                CursorState::Hovering(new_payload)
-                            };
-                        }
-                        Payload::Connection(connection)
-                            if state.pressed_mb == Some(Button::Left) =>
-                        {
-                            if let Some(on_event) = &self.on_event {
-                                shell.publish(on_event(GraphEvent::Disconnect {
-                                    connection_id: *connection,
-                                }));
-                            }
-
-                            let connection = self
-                                .data
-                                .connections
-                                .get(*connection)
-                                .expect("Invalid connection");
-
-                            let a = self.data.get(connection.a.0).unwrap();
-                            let b = self.data.get(connection.b.0).unwrap();
-
-                            let a_size = layout
-                                .children()
-                                .nth(connection.a.0)
-                                .expect("Invalid connection")
-                                .bounds()
-                                .size();
-
-                            let b_size = layout
-                                .children()
-                                .nth(connection.b.0)
-                                .expect("Invalid connection")
-                                .bounds()
-                                .size();
-
-                            let a_attachment = connection.a.1.clone();
-                            let b_attachment = connection.b.1.clone();
-
-                            let a_att_pos =
-                                a_attachment.resolve(a_size, a.position + self.position);
-                            let b_att_pos =
-                                b_attachment.resolve(b_size, b.position + self.position);
-
-                            let cursor_pos =
-                                cursor_pos - Vector::new(layout.position().x, layout.position().y);
-
-                            let delta_to_a = a_att_pos.distance(cursor_pos);
-                            let delta_to_b = b_att_pos.distance(cursor_pos);
-
-                            let new_payload = if delta_to_a < delta_to_b {
-                                Payload::Attachment(connection.b.0, b_attachment)
-                            } else {
-                                Payload::Attachment(connection.a.0, a_attachment)
-                            };
-
-                            state.cursor_state = CursorState::Dragging(new_payload);
-                        }
-                        Payload::Connection(_) => {
-                            state.cursor_state = CursorState::Hovering(new_payload);
-                        }
-                        Payload::SelectionRect => unreachable!(),
-                    },
-                }
-
-                status = Status::Captured;
-            }
+            }) => self.on_cursor_moved(cursor_pos, state, new_payload, shell, &layout),
             Event::Mouse(mouse::Event::ButtonPressed(button)) => 'ev: {
                 let Some(cursor_pos) = cursor.position() else {
-                    break 'ev;
+                    break 'ev Status::Ignored;
                 };
 
                 if !layout.bounds().contains(cursor_pos) {
-                    break 'ev;
+                    break 'ev Status::Ignored;
                 }
 
                 state.pressed_mb = Some(button);
 
                 state.cursor_state = CursorState::Hovering(new_payload);
 
-                status = Status::Captured;
+                Status::Captured
             }
-            Event::Mouse(mouse::Event::ButtonReleased(Button::Left | Button::Middle)) => {
-                state.pressed_mb = None;
-
-                match &state.cursor_state {
-                    CursorState::Dragging(Payload::Attachment(a, a_attachment)) => {
-                        if let Some(on_event) = &self.on_event {
-                            if let Payload::Attachment(b, b_attachment) = new_payload.clone() {
-                                let mut allowed = true;
-
-                                if !self.allow_self_connections && *a == b {
-                                    allowed = false;
-                                }
-
-                                if !self.allow_similar_connections
-                                    && let Some((connection_id, _)) =
-                                        self.data.connections.iter().enumerate().find(
-                                            |(_, conn)| {
-                                                (conn.a.0 == *a && conn.b.0 == b)
-                                                    || (conn.a.0 == b && conn.b.0 == *a)
-                                            },
-                                        )
-                                {
-                                    shell.publish(on_event(GraphEvent::Disconnect {
-                                        connection_id,
-                                    }));
-                                }
-
-                                if allowed {
-                                    shell.publish(on_event(GraphEvent::Connect {
-                                        a: *a,
-                                        a_attachment: a_attachment.clone(),
-                                        b,
-                                        b_attachment,
-                                    }));
-                                }
-                            } else if matches!(new_payload, Payload::Background) {
-                                shell.publish(on_event(GraphEvent::ConnectionDropped {
-                                    id: *a,
-                                    attachment: a_attachment.clone(),
-                                }))
-                            }
-                        }
-                    }
-                    CursorState::Dragging(Payload::SelectionRect) => {
-                        let mut top_left = state.drag_start_point;
-                        let mut bottom_right = state.cursor_pos;
-
-                        if bottom_right.x < top_left.x {
-                            std::mem::swap(&mut top_left.x, &mut bottom_right.x);
-                        }
-                        if bottom_right.y < top_left.y {
-                            std::mem::swap(&mut top_left.y, &mut bottom_right.y);
-                        }
-
-                        let rect = Rectangle::new(top_left, (bottom_right - top_left).into());
-
-                        let mut selected: Vec<_> = layout
-                            .children()
-                            .zip(self.data.nodes.iter())
-                            .enumerate()
-                            .filter_map(|(i, (child, node))| {
-                                rect.intersects(&transform_node_bounds(
-                                    child.bounds(),
-                                    self.zoom,
-                                    self.position,
-                                    node.position,
-                                ))
-                                .then_some(i)
-                            })
-                            .collect();
-
-                        if state.shift_pressed {
-                            state.selection.append(&mut selected);
-
-                            // remove duplicates
-                            state.selection.sort();
-                            state.selection.dedup();
-                        } else {
-                            state.selection = selected;
-                        }
-                    }
-                    CursorState::Hovering(Payload::Node(id, old_status))
-                        if old_status == &Status::Ignored && status == Status::Ignored =>
-                    {
-                        if !state.shift_pressed {
-                            state.selection.clear();
-                        }
-                        if let Some(index) = state.selection.iter().position(|s| s == id) {
-                            state.selection.remove(index);
-                        } else {
-                            state.selection.push(*id);
-                        }
-                    }
-                    CursorState::Hovering(Payload::Background) => {
-                        state.selection.clear();
-                    }
-                    _ => (),
-                }
-
-                state.cursor_state = CursorState::Hovering(new_payload);
-
-                status = Status::Captured;
+            Event::Mouse(mouse::Event::ButtonReleased(btn)) => {
+                self.on_mouse_button_released(btn, state, new_payload, shell, layout, status)
             }
             Event::Mouse(mouse::Event::WheelScrolled { delta }) => 'ev: {
                 let Some(cursor_pos) = cursor.position() else {
-                    break 'ev;
+                    break 'ev Status::Ignored;
                 };
 
                 if !layout.bounds().contains(cursor_pos) {
-                    break 'ev;
+                    break 'ev Status::Ignored;
                 }
 
                 let (delta_x, delta_y) = match delta {
@@ -1140,7 +1163,7 @@ where
                     shell.publish(on_event(GraphEvent::Zoom(self.zoom)));
                 }
 
-                status = Status::Captured;
+                Status::Captured
             }
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: Key::Named(Named::Delete),
@@ -1188,33 +1211,40 @@ where
                     }
 
                     state.selection.clear();
-                    status = Status::Captured;
+                    Status::Captured
+                } else {
+                    Status::Ignored
                 }
             }
             Event::Keyboard(keyboard::Event::ModifiersChanged(mods)) => {
                 state.shift_pressed = mods.contains(Modifiers::SHIFT);
 
-                status = Status::Captured;
+                Status::Captured
             }
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: Key::Character(char),
                 modifiers,
                 ..
-            }) => {
-                if modifiers.control() && char == "a" {
+            }) => match char.chars().next().unwrap() {
+                'a' if modifiers.control() => {
                     state.selection.clear();
 
                     state.selection.extend(0..self.data.nodes.len());
 
-                    status = Status::Captured;
+                    Status::Captured
                 }
-                if char == "d" {
+                'd' => {
                     state.debug = !state.debug;
-                    status = Status::Captured;
+                    Status::Captured
                 }
-            }
-            _ => (),
+                _ => Status::Ignored,
+            },
+            _ => Status::Ignored,
         };
+
+        if new_status == Status::Captured {
+            status = Status::Captured;
+        }
 
         if let Some(node_positioning) = &self.node_positioning
             && let Some(on_event) = &self.on_event
