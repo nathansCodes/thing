@@ -147,14 +147,12 @@ where
                     state.lmb_pressed = false;
                     Status::Captured
                 }
-                mouse::Event::CursorMoved { position } => {
+                mouse::Event::CursorMoved { .. } => {
                     let was_hovered = state.is_hovered;
                     state.is_hovered = layout
-                        .children()
-                        .next()
-                        .unwrap()
                         .bounds()
-                        .contains(position);
+                        .intersection(viewport)
+                        .is_some_and(|bounds| cursor.position_over(bounds).is_some());
 
                     if was_hovered && !state.is_hovered && state.lmb_pressed {
                         shell.publish((self.set_payload)(Some(self.payload.clone())));
