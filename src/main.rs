@@ -9,6 +9,7 @@ use crate::widgets::dnd::{dnd_indicator, dnd_receiver};
 use graph::connections::Edge;
 use graph::line_styles::AxisAligned;
 use graph::{GraphEvent, GraphNode, RelativeAttachment, line_styles};
+use iced::border::Radius;
 use widgets::*;
 
 use iced::keyboard::{Key, Modifiers};
@@ -182,24 +183,15 @@ fn view(state: &State) -> Element<'_, Message> {
                     .allow_self_connections(true)
                     .allow_similar_connections(true);
 
-                let graph = container(graph).style(|theme: &Theme| {
-                    container::Style::default()
-                        .background(theme.extended_palette().background.base.color)
-                });
-
-                Element::from(
-                    container(Element::from(dnd_receiver(
-                        |payload, relative_cursor_pos| match payload {
-                            Draggable::ImageAsset(path) => {
-                                Some(Message::DropImageOnGraph(path, relative_cursor_pos))
-                            }
-                        },
-                        state.dnd_payload.clone(),
-                        graph,
-                    )))
-                    .center_x(Fill)
-                    .center_y(Fill),
-                )
+                Element::from(dnd_receiver(
+                    |payload, relative_cursor_pos| match payload {
+                        Draggable::ImageAsset(path) => {
+                            Some(Message::DropImageOnGraph(path, relative_cursor_pos))
+                        }
+                    },
+                    state.dnd_payload.clone(),
+                    container(graph).padding(2.0).center_x(Fill).center_y(Fill),
+                ))
             }
             Pane::Assets => container(assets::view(&state.assets).map(Message::AssetsMessage))
                 .padding(Padding::new(5.0))
