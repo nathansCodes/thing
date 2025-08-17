@@ -164,7 +164,7 @@ fn view(state: &State) -> Element<'_, Message> {
                     .position(state.graph_position)
                     .zoom(state.graph_zoom)
                     .on_event(Message::GraphEvent)
-                    .position_nodes(position_scheme)
+                    .position_nodes(family_tree)
                     .per_node_attachments(|node| {
                         match node {
                             Node::Character(_) => vec![
@@ -644,7 +644,7 @@ fn view_node(node: &Node) -> Element<'_, Message> {
 }
 
 #[allow(clippy::type_complexity)]
-fn position_scheme(
+fn family_tree(
     prev: Option<(
         usize,
         &GraphNode<Node>,
