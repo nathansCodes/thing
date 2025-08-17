@@ -1745,6 +1745,7 @@ dependencies = [
  "iced",
  "iced_aw",
  "lyon_algorithms",
+ "palette",
  "rfd",
  "serde",
  "toml",
