@@ -13,7 +13,7 @@ use crate::{
     Message,
     notification::Notification,
     style,
-    widgets::graph::{Graph, GraphData, RelativeAttachment},
+    widgets::graph::{Graph, GraphData},
 };
 
 pub fn base_button<'a>(content: impl Into<Element<'a, Message>>) -> button::Button<'a, Message> {

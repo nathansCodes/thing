@@ -74,7 +74,7 @@ pub fn update(state: &mut AssetsPane, message: AssetsMessage) -> Task<AssetsMess
     }
 }
 
-pub fn view(state: &AssetsPane) -> Element<AssetsMessage> {
+pub fn view(state: &AssetsPane) -> Element<'_, AssetsMessage> {
     match state.view {
         AssetType::Image => scrollable(
             row(state.files.iter().map(|path| {

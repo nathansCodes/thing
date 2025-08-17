@@ -6,6 +6,7 @@ pub struct Notification {
     pub timeout: f32,
 }
 
+#[allow(unused)]
 impl Notification {
     pub fn info(title: impl Into<String>, content: impl Into<String>) -> Self {
         Self {
