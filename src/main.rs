@@ -9,11 +9,10 @@ use crate::widgets::dnd::{dnd_indicator, dnd_receiver};
 use graph::connections::Edge;
 use graph::line_styles::AxisAligned;
 use graph::{GraphEvent, GraphNode, RelativeAttachment, line_styles};
-use iced::border::Radius;
 use widgets::*;
 
 use iced::keyboard::{Key, Modifiers};
-use iced::widget::{horizontal_space, row, scrollable, stack};
+use iced::widget::{horizontal_space, row, scrollable, slider, stack};
 use iced::{
     Alignment, Border, Element, Font,
     Length::Fill,
@@ -183,6 +182,32 @@ fn view(state: &State) -> Element<'_, Message> {
                     .allow_self_connections(true)
                     .allow_similar_connections(true);
 
+                let mut zoom_text = (state.graph_zoom * 100.0).round().to_string();
+                zoom_text.retain(|c| c != '.');
+
+                let info_bar = container(
+                    row![
+                        horizontal_space(),
+                        slider(0.5..=2.0, state.graph_zoom, |new_zoom| Message::GraphEvent(
+                            GraphEvent::Zoom(new_zoom)
+                        ))
+                        .width(100.0)
+                        .step(0.05)
+                        .style(style::info_bar_zoom_slider),
+                        text(zoom_text + "%")
+                            .size(13.0)
+                            .width(35.0)
+                            .align_x(Alignment::End),
+                    ]
+                    .spacing(4.0)
+                    .height(Fill)
+                    .align_y(Alignment::Center),
+                )
+                .padding(4.0)
+                .width(Fill)
+                .height(30.0)
+                .style(style::info_bar);
+
                 Element::from(dnd_receiver(
                     |payload, relative_cursor_pos| match payload {
                         Draggable::ImageAsset(path) => {
@@ -190,7 +215,10 @@ fn view(state: &State) -> Element<'_, Message> {
                         }
                     },
                     state.dnd_payload.clone(),
-                    container(graph).padding(2.0).center_x(Fill).center_y(Fill),
+                    column![
+                        container(graph).padding(2.0).center_x(Fill).center_y(Fill),
+                        info_bar,
+                    ],
                 ))
             }
             Pane::Assets => container(assets::view(&state.assets).map(Message::AssetsMessage))
@@ -366,7 +394,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 Task::none()
             }
             GraphEvent::Zoom(zoom) => {
-                state.graph_zoom = zoom.clamp(0.3, 2.0);
+                state.graph_zoom = zoom;
                 Task::none()
             }
             GraphEvent::MoveNode {
