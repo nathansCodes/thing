@@ -187,6 +187,11 @@ fn view(state: &State) -> Element<'_, Message> {
 
                 let info_bar = container(
                     row![
+                        text(format!(
+                            "Position: {} {}",
+                            state.graph_position.x, state.graph_position.y
+                        ))
+                        .size(14.0),
                         horizontal_space(),
                         slider(0.5..=2.0, state.graph_zoom, |new_zoom| Message::GraphEvent(
                             GraphEvent::Zoom(new_zoom)
