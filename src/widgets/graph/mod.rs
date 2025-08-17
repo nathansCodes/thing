@@ -216,8 +216,8 @@ where
                 path.pop();
 
                 let origin = lyon_algorithms::geom::euclid::Point2D::new(
-                    cursor_pos.x - layout.position().x - self.position.x * self.zoom,
-                    cursor_pos.y - layout.position().y - self.position.y * self.zoom,
+                    cursor_pos.x - layout.position().x + self.position.x * self.zoom,
+                    cursor_pos.y - layout.position().y + self.position.y * self.zoom,
                 );
 
                 let directions: Vec<_> = [
@@ -278,7 +278,7 @@ where
                                 layout.position()
                                     + (point - layout.position())
                                         * Transformation::scale(1.0 / self.zoom)
-                                    - self.position,
+                                    + self.position,
                             ),
                         };
 
@@ -353,13 +353,13 @@ where
             CursorState::Dragging(payload) => match payload {
                 Payload::Background => {
                     let mut new_position = state.drag_origin
-                        + (cursor_pos - state.drag_start_point)
+                        - (cursor_pos - state.drag_start_point)
                             * Transformation::scale(1.0 / self.zoom);
 
                     // limiting the position to negative values cause the
                     // renderer doesn't render elements with negative positions properly
-                    new_position.x = new_position.x.min(0.0);
-                    new_position.y = new_position.y.min(0.0);
+                    new_position.x = new_position.x.max(0.0);
+                    new_position.y = new_position.y.max(0.0);
 
                     shell.publish(on_event(GraphEvent::Move(new_position)));
                     shell.invalidate_layout();
@@ -504,8 +504,8 @@ where
                     let a_attachment = connection.a.1.clone();
                     let b_attachment = connection.b.1.clone();
 
-                    let a_att_pos = a_attachment.resolve(a_size, a.position + self.position);
-                    let b_att_pos = b_attachment.resolve(b_size, b.position + self.position);
+                    let a_att_pos = a_attachment.resolve(a_size, a.position - self.position);
+                    let b_att_pos = b_attachment.resolve(b_size, b.position - self.position);
 
                     let cursor_pos =
                         cursor_pos - Vector::new(layout.position().x, layout.position().y);
@@ -729,8 +729,8 @@ where
                             let a_attachment = connection.a.1.clone();
                             let b_attachment = connection.b.1.clone();
 
-                            let from = a_attachment.resolve(a_size, a.position + self.position);
-                            let to = b_attachment.resolve(b_size, b.position + self.position);
+                            let from = a_attachment.resolve(a_size, a.position - self.position);
+                            let to = b_attachment.resolve(b_size, b.position - self.position);
 
                             let path = Attachment::path(a_attachment, from, b_attachment, to);
 
@@ -771,7 +771,7 @@ where
                                 .size();
 
                             let attachment_point =
-                                attachment.resolve(size, node.position + self.position);
+                                attachment.resolve(size, node.position - self.position);
 
                             frame.fill(
                                 &Path::circle(attachment_point, 10.0 / self.zoom),
@@ -792,7 +792,7 @@ where
                                 .bounds()
                                 .size();
 
-                            let from = attachment.resolve(size, node.position + self.position);
+                            let from = attachment.resolve(size, node.position - self.position);
 
                             let to = (state.cursor_pos
                                 - Vector::new(bounds_position.x, bounds_position.y))
@@ -832,8 +832,8 @@ where
                                 let x = i as f32 * step_size;
                                 let y = j as f32 * step_size;
                                 let pos = Point::new(
-                                    x + self.position.x % step_size,
-                                    y + self.position.y % step_size,
+                                    x - self.position.x % step_size,
+                                    y - self.position.y % step_size,
                                 );
                                 let rect = Rectangle::new(
                                     pos,
@@ -876,8 +876,7 @@ where
                         let node_pos = Vector::new(layout.position().x, layout.position().y);
 
                         renderer.with_translation(
-                            self.position - node_pos
-                                + node_pos * Transformation::scale(1.0 / self.zoom),
+                            Vector::ZERO - node_pos + node_pos * (1.0 / self.zoom) - self.position,
                             |renderer| {
                                 // make sure the cursor position is transformed properly
                                 let cursor = match cursor {
@@ -886,7 +885,7 @@ where
                                         layout.position()
                                             + (point - layout.position())
                                                 * Transformation::scale(1.0 / self.zoom)
-                                            - self.position,
+                                            + self.position,
                                     ),
                                 };
 
@@ -937,7 +936,7 @@ where
                                 .background
                                 .base
                                 .color
-                                .scale_alpha(self.position.x.max(-10.0) / -10.0),
+                                .scale_alpha(self.position.x.min(10.0) / 10.0),
                         },
                         ColorStop {
                             offset: 10.0 / layout.bounds().width,
@@ -979,7 +978,7 @@ where
                                 .background
                                 .base
                                 .color
-                                .scale_alpha(self.position.y.max(-10.0) / -10.0),
+                                .scale_alpha(self.position.y.min(10.0) / 10.0),
                         },
                     ]),
                 ),
@@ -1056,7 +1055,7 @@ where
         renderer.fill_quad(
             Quad {
                 bounds: Rectangle::new(
-                    layout.bounds().center() + self.position,
+                    layout.bounds().center() - self.position,
                     Size::new(5.0, 5.0),
                 ),
                 ..Default::default()
@@ -1406,7 +1405,7 @@ fn transform_node_bounds(
     let vertical_padding = bounds.height * zoom - bounds.height;
 
     (bounds
-        * Transformation::translate(position.x * zoom, position.y * zoom)
+        * Transformation::translate(-position.x * zoom, -position.y * zoom)
         * Transformation::translate(-node_position.x, -node_position.y)
         * Transformation::translate(node_position.x * zoom, node_position.y * zoom))
     .expand(Padding {
