@@ -1,6 +1,5 @@
 use iced::border::Radius;
 use iced::gradient::{ColorStop, Linear};
-use iced::widget::slider::Handle;
 use iced::widget::{button, container, rule, slider};
 use iced::{Border, Color, Gradient, Radians, Shadow, Theme, Vector};
 use iced_aw::style::menu_bar;
@@ -303,12 +302,17 @@ pub fn info_bar(theme: &Theme) -> container::Style {
     let default = container::dark(theme);
     let palette = theme.extended_palette();
 
+    let weak_color = mix_colors(
+        palette.primary.strong.color,
+        palette.primary.weak.color,
+        0.7,
+    );
     let base_color = palette.primary.weak.color;
 
     let gradient = Gradient::Linear(Linear::new(Radians::PI).add_stops([
         ColorStop {
             offset: 0.0,
-            color: base_color.scale_alpha(0.5),
+            color: weak_color,
         },
         ColorStop {
             offset: 1.0,
@@ -316,21 +320,25 @@ pub fn info_bar(theme: &Theme) -> container::Style {
         },
     ]));
 
-    let accent_strong = Srgba::from(palette.primary.strong.color.into_linear());
-    let default_text_color = Srgba::from(default.text_color.unwrap_or(Color::WHITE).into_linear());
-
-    let accent_strong = Oklab::from_color_unclamped(accent_strong);
-    let default_text_color = Oklab::from_color_unclamped(default_text_color);
-
-    let text_color: Srgba = accent_strong.mix(default_text_color, 0.8).into_color();
+    let text_color = mix_colors(
+        palette.primary.base.color,
+        default
+            .text_color
+            .unwrap_or(if theme.extended_palette().is_dark {
+                Color::BLACK
+            } else {
+                Color::WHITE
+            }),
+        0.8,
+    );
 
     container::Style {
         background: Some(gradient.into()),
-        border: Border::default().rounded(10.0).width(1.0).color(base_color),
-        text_color: Some(Color::from(text_color)),
+        border: Border::default().rounded(15.0).width(2.0).color(base_color),
+        text_color: Some(text_color),
         shadow: Shadow {
             blur_radius: 10.0,
-            color: Color::from(text_color),
+            color: text_color,
             ..Default::default()
         },
     }
@@ -392,4 +400,15 @@ pub fn info_bar_zoom_slider(theme: &Theme, status: slider::Status) -> slider::St
             border_color: active_color_bright,
         },
     }
+}
+
+fn mix_colors(a: Color, b: Color, t: f32) -> Color {
+    let a_srgba = Srgba::from(a.into_linear());
+    let b_srgba = Srgba::from(b.into_linear());
+
+    let a_oklab = Oklab::from_color_unclamped(a_srgba);
+    let b_oklab = Oklab::from_color_unclamped(b_srgba);
+
+    let mixed: Srgba = a_oklab.mix(b_oklab, t).into_color();
+    mixed.into()
 }
