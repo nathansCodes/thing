@@ -208,7 +208,7 @@ fn view(state: &State) -> Element<'_, Message> {
                     .height(Fill)
                     .align_y(Alignment::Center),
                 )
-                .padding(4.0)
+                .padding([4.0, 8.0])
                 .width(Fill)
                 .height(30.0)
                 .style(style::info_bar);
