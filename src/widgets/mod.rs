@@ -9,7 +9,12 @@ use iced::{
     widget::{Container, button, column, container, horizontal_rule, horizontal_space, row, text},
 };
 
-use crate::{Message, notification::Notification, style};
+use crate::{
+    Message,
+    notification::Notification,
+    style,
+    widgets::graph::{Graph, GraphData, RelativeAttachment},
+};
 
 pub fn base_button<'a>(content: impl Into<Element<'a, Message>>) -> button::Button<'a, Message> {
     button(content).padding([4, 8]).style(style::base_button)
@@ -97,4 +102,17 @@ pub fn notification(i: usize, notification: &Notification) -> Container<Message>
     ])
     .width(250.0)
     .style(style::notification(&notification.severity))
+}
+
+pub fn graph<'a, Message, Renderer, F, Data, Attachment>(
+    data: &'a GraphData<Data, Attachment>,
+    view_node: F,
+) -> Graph<'a, Message, Renderer, Data, Attachment>
+where
+    Renderer: iced::advanced::image::Renderer + iced::advanced::graphics::geometry::Renderer,
+    Data: std::fmt::Debug,
+    Attachment: graph::Attachment + PartialEq + 'static,
+    F: Fn(&Data) -> Element<Message, iced::Theme, Renderer>,
+{
+    Graph::new(data, view_node)
 }

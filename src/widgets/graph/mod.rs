@@ -70,7 +70,7 @@ where
     Data: std::fmt::Debug,
     Attachment: connections::Attachment + PartialEq + 'static,
 {
-    pub fn new<F>(data: &'a GraphData<Data, Attachment>, view_node: F) -> Self
+    pub(super) fn new<F>(data: &'a GraphData<Data, Attachment>, view_node: F) -> Self
     where
         F: Fn(&Data) -> Element<Message, Theme, Renderer>,
     {

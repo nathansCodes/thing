@@ -29,7 +29,7 @@ use std::time::Duration;
 
 use crate::{
     assets::{AssetType, AssetsMessage, AssetsPane},
-    graph::{Graph, GraphData},
+    graph::GraphData,
     io::{IOError, pick_file, pick_folder},
 };
 
@@ -160,7 +160,7 @@ fn view(state: &State) -> Element<'_, Message> {
 
         let mut content = pane_grid::Content::new(match pane {
             Pane::Graph => {
-                let graph = Graph::new(&state.nodes, view_node)
+                let graph = graph(&state.nodes, view_node)
                     .position(state.graph_position)
                     .zoom(state.graph_zoom)
                     .on_event(Message::GraphEvent)
