@@ -574,7 +574,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::done(Message::AddImage(
                 path,
                 relative_cursor_pos * Transformation::scale(1.0 / state.graph_zoom)
-                    - state.graph_position,
+                    + state.graph_position,
             ))
         }
     }
