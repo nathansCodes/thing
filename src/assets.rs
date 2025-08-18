@@ -8,7 +8,7 @@ use iced::{
     widget::{column, container, image, mouse_area, row, scrollable, text},
 };
 
-use crate::{io::IOError, widgets::dnd::dnd_provider};
+use crate::{io::IOError, style, widgets::dnd::dnd_provider};
 
 #[derive(Default, Debug, Clone, Copy)]
 pub enum AssetType {
@@ -107,6 +107,7 @@ pub fn view(state: &AssetsPane) -> Element<'_, AssetsMessage> {
             .width(Fill)
             .wrap(),
         )
+        .style(style::scrollable)
         .into(),
     }
 }
