@@ -1159,9 +1159,8 @@ where
 
                 let new_zoom = self.zoom + delta_y;
 
-                if (0.5..=2.0).contains(&new_zoom) {
-                    self.zoom = new_zoom;
-                    shell.publish(on_event(GraphEvent::Zoom(new_zoom)));
+                if (0.5..=2.0).contains(&self.zoom) || (0.5..=2.0).contains(&new_zoom) {
+                    shell.publish(on_event(GraphEvent::Zoom(new_zoom.clamp(0.5, 2.0))));
                 }
 
                 Status::Captured
