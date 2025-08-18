@@ -2,9 +2,10 @@ pub mod dnd;
 pub mod graph;
 
 use iced::{
-    Alignment, Element, Font,
+    Alignment, Border, Element, Font,
     Length::Fill,
     Padding,
+    border::Radius,
     font::Weight,
     widget::{Container, button, column, container, horizontal_rule, horizontal_space, row, text},
 };
@@ -26,7 +27,7 @@ pub fn menu_button(label: &str) -> button::Button<'_, Message> {
 
     base_button(text(label).align_y(Alignment::Center).size(15.0).font(font))
         .on_press(Message::MenuButtonPressed)
-        .style(style::menu_item)
+        .style(style::menu_button)
 }
 
 pub fn menu_item_button<'a>(
@@ -42,21 +43,18 @@ pub fn menu_item_button<'a>(
             horizontal_space(),
         ]
         .push_maybe(flavor_text.map(|flavor_text| {
-            container(
-                text(flavor_text)
-                    .align_y(Alignment::Center)
-                    .size(13.0)
-                    .font(font),
-            )
-            .align_y(Alignment::Center)
+            text(flavor_text)
+                .align_y(Alignment::Center)
+                .size(13.0)
+                .font(font)
         }))
         .align_y(Alignment::Center),
     )
     .width(Fill)
-    .style(style::menu_item)
+    .style(style::menu_button)
 }
 
-pub fn notification(i: usize, notification: &Notification) -> Container<Message> {
+pub fn notification(i: usize, notification: &Notification) -> Container<'_, Message> {
     let mut title_font = Font::DEFAULT;
 
     title_font.weight = Weight::Bold;

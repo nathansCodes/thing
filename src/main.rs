@@ -138,7 +138,7 @@ fn view(state: &State) -> Element<'_, Message> {
         let is_focused = state.focus == Some(id);
 
         let mut title_bar_font = Font::DEFAULT;
-        title_bar_font.weight = Weight::Bold;
+        title_bar_font.weight = Weight::Semibold;
 
         let title_bar = pane_grid::TitleBar::new(
             container(
@@ -194,9 +194,9 @@ fn view(state: &State) -> Element<'_, Message> {
                             ))
                             .size(14.0),
                             horizontal_space(),
-                            slider(0.5..=2.0, state.graph_zoom, |new_zoom| Message::GraphEvent(
-                                GraphEvent::Zoom(new_zoom)
-                            ))
+                            slider(0.5..=2.0, state.graph_zoom, |new_zoom| {
+                                Message::GraphEvent(GraphEvent::Zoom(new_zoom))
+                            })
                             .width(100.0)
                             .step(0.05)
                             .style(style::info_bar_zoom_slider),
@@ -214,18 +214,8 @@ fn view(state: &State) -> Element<'_, Message> {
                     .height(30.0)
                     .style(style::info_bar),
                 )
-                .style(|theme| {
-                    let palette = theme.extended_palette();
-                    container::Style {
-                        border: Border {
-                            color: palette.background.weak.color,
-                            width: 2.0,
-                            radius: 17.0.into(),
-                        },
-                        ..container::dark(theme)
-                    }
-                })
-                .padding(2.0);
+                .style(style::info_bar_border)
+                .padding(Padding::new(2.0).bottom(1.0));
 
                 Element::from(dnd_receiver(
                     |payload, relative_cursor_pos| match payload {
@@ -236,7 +226,7 @@ fn view(state: &State) -> Element<'_, Message> {
                     state.dnd_payload.clone(),
                     stack![
                         container(graph).padding(2.0).center_x(Fill).center_y(Fill),
-                        column![vertical_space(), info_bar,]
+                        column![vertical_space(), info_bar,].padding(4.0)
                     ],
                 ))
             }
@@ -632,17 +622,7 @@ fn view_node(node: &Node) -> Element<'_, Message> {
         .width(150.0)
         .height(150.0)
         .padding(5.0)
-        .style(|theme: &Theme| {
-            let palette = theme.extended_palette();
-            container::Style::default()
-                .background(palette.background.base.color)
-                .border(
-                    Border::default()
-                        .rounded(15.0)
-                        .width(2.0)
-                        .color(palette.background.weak.color),
-                )
-        })
+        .style(style::node)
         .into(),
         Node::Family => container("")
             .width(10.0)
