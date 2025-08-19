@@ -389,7 +389,7 @@ pub fn graph_overlay(theme: &Theme) -> container::Style {
     }
 }
 
-fn notification_bg_color(theme: &Theme, severity: &Severity) -> Pair {
+fn notification_bg_color(theme: &Theme, severity: Severity) -> Pair {
     let palette = theme.extended_palette();
 
     match severity {
@@ -420,7 +420,7 @@ fn notification_bg_color(theme: &Theme, severity: &Severity) -> Pair {
     }
 }
 
-pub fn notification<'a>(severity: &'a Severity) -> container::StyleFn<'a, Theme> {
+pub fn notification<'a>(severity: Severity) -> container::StyleFn<'a, Theme> {
     Box::new(move |theme: &Theme| {
         let Pair { color, text } = notification_bg_color(theme, severity);
 
@@ -459,7 +459,7 @@ pub fn notification<'a>(severity: &'a Severity) -> container::StyleFn<'a, Theme>
     })
 }
 
-pub fn notification_title<'a>(severity: &'a Severity) -> container::StyleFn<'a, Theme> {
+pub fn notification_title<'a>(severity: Severity) -> container::StyleFn<'a, Theme> {
     Box::new(move |theme: &Theme| {
         let Pair { color, text } = notification_bg_color(theme, severity);
 
@@ -472,7 +472,7 @@ pub fn notification_title<'a>(severity: &'a Severity) -> container::StyleFn<'a, 
     })
 }
 
-pub fn notification_close_button<'a>(severity: &'a Severity) -> button::StyleFn<'a, Theme> {
+pub fn notification_close_button<'a>(severity: Severity) -> button::StyleFn<'a, Theme> {
     Box::new(move |theme: &Theme, status: button::Status| {
         let palette = theme.extended_palette();
 
@@ -547,7 +547,7 @@ pub fn notification_close_button<'a>(severity: &'a Severity) -> button::StyleFn<
 }
 
 pub fn notification_timeout_indicator<'a>(
-    severity: &'a Severity,
+    severity: Severity,
     timeout: f32,
 ) -> rule::StyleFn<'a, Theme> {
     Box::new(move |theme: &Theme| {
