@@ -419,9 +419,19 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             )))
         }
         Message::LoadDataFailed(err) => {
+            let message = match err {
+                IOError::DeserializationFailed(ref error) => {
+                    format!("error at {:?}: {}", error.span(), error.message())
+                }
+                IOError::DialogClosed => "".to_string(),
+                IOError::IO(error_kind) => {
+                    format!("IO error occurred: {error_kind:#?}")
+                }
+            };
+
             state.notifications.push(Notification::error(
                 "Failed to load data",
-                format!("Failed to load data: {err:#?}",),
+                format!("Failed to load data: {message}",),
             ));
             Task::none()
         }
