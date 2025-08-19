@@ -8,7 +8,10 @@ use iced::{
     Length::Fill,
     Padding,
     font::Weight,
-    widget::{Container, button, column, container, horizontal_rule, horizontal_space, row, text},
+    widget::{
+        Container, button, column, container, horizontal_rule, horizontal_space, row, scrollable,
+        text,
+    },
 };
 
 use crate::{
@@ -91,15 +94,25 @@ pub fn notification(i: usize, notification: &Notification) -> Container<'_, Mess
     container(column![
         header,
         container(
-            horizontal_rule(2.0).style(style::notification_timeout_indicator(
-                notification.severity,
-                notification.timeout
-            ))
+            column![
+                horizontal_rule(2.0).style(style::notification_timeout_indicator(
+                    notification.severity,
+                    notification.timeout
+                )),
+                scrollable(
+                    container(text(&notification.content).size(14.0).width(Fill))
+                        .padding(Padding::new(0.0).right(4.0))
+                )
+                .style(style::scrollable)
+            ]
+            .spacing(4.0)
         )
-        .padding([0.0, 2.0]),
-        container(text(&notification.content).size(14.0)).padding(4.0)
+        .style(style::notification_content(notification.severity))
+        .padding(Padding::new(4.0).top(0.0))
     ])
     .width(250.0)
+    .max_height(300.0)
+    .padding(Padding::new(2.0).top(1.0))
     .style(style::notification(notification.severity))
 }
 
