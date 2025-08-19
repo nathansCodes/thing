@@ -77,7 +77,7 @@ pub fn notification(i: usize, notification: &Notification) -> Container<'_, Mess
                     .font(x_font)
                     .size(14.0)
             )
-            .style(style::notification_close_button(&notification.severity))
+            .style(style::notification_close_button(notification.severity))
             .width(25.0)
             .height(25.0)
             .on_press(Message::DismissNotification(i))
@@ -85,13 +85,13 @@ pub fn notification(i: usize, notification: &Notification) -> Container<'_, Mess
         .align_y(Alignment::Center),
     )
     .padding(Padding::default().left(8.0).right(2.0).top(2.0).bottom(2.0))
-    .style(style::notification_title(&notification.severity));
+    .style(style::notification_title(notification.severity));
 
     container(column![
         header,
         container(
             horizontal_rule(2.0).style(style::notification_timeout_indicator(
-                &notification.severity,
+                notification.severity,
                 notification.timeout
             ))
         )
@@ -99,7 +99,7 @@ pub fn notification(i: usize, notification: &Notification) -> Container<'_, Mess
         container(text(&notification.content).size(14.0)).padding(4.0)
     ])
     .width(250.0)
-    .style(style::notification(&notification.severity))
+    .style(style::notification(notification.severity))
 }
 
 pub fn graph<'a, Message, Renderer, F, Data, Attachment>(

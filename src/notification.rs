@@ -36,7 +36,7 @@ impl Notification {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Severity {
     Info,
     Destructive,
