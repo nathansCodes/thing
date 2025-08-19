@@ -1,6 +1,5 @@
 use iced::border::Radius;
 use iced::gradient::{ColorStop, Linear};
-use iced::theme::palette::Pair;
 use iced::widget::{self, button, container, rule, slider};
 use iced::{Border, Color, Gradient, Radians, Shadow, Theme, Vector};
 use iced_aw::style::menu_bar;
@@ -410,84 +409,76 @@ pub fn graph_overlay(theme: &Theme) -> container::Style {
     }
 }
 
-fn notification_bg_color(theme: &Theme, severity: Severity) -> Pair {
+/// (bg_gradient_start, bg_gradient_end, text_color)
+fn notification_bg_colors(theme: &Theme, severity: Severity) -> (Color, Color, Color) {
     let palette = theme.extended_palette();
 
     match severity {
-        Severity::Info => Pair {
-            color: mix_colors(
+        Severity::Info => (
+            mix_colors(
                 palette.primary.base.color,
                 palette.background.weak.color,
-                0.5,
+                0.3,
             ),
-            text: palette.background.base.text,
-        },
-        Severity::Destructive => Pair {
-            color: mix_colors(
+            palette.primary.base.color,
+            palette.background.base.text,
+        ),
+        Severity::Destructive => (
+            mix_colors(
                 palette.danger.base.color,
                 palette.background.weak.color,
-                0.5,
+                0.3,
             ),
-            text: palette.background.base.text,
-        },
-        Severity::Error => Pair {
-            color: mix_colors(
-                palette.background.weak.color,
+            palette.danger.base.color,
+            palette.background.base.text,
+        ),
+        Severity::Error => (
+            mix_colors(
                 palette.danger.base.color,
-                0.5,
+                palette.background.weak.color,
+                0.3,
             ),
-            text: palette.background.base.text,
-        },
+            palette.danger.base.color,
+            palette.background.base.text,
+        ),
     }
 }
 
 pub fn notification<'a>(severity: Severity) -> container::StyleFn<'a, Theme> {
     Box::new(move |theme: &Theme| {
-        let Pair { color, text } = notification_bg_color(theme, severity);
+        let (_, bg_gradient_end, text) = notification_bg_colors(theme, severity);
 
-        match severity {
-            notification::Severity::Info => container::Style {
-                text_color: Some(text),
-                background: Some(color.scale_alpha(0.5).into()),
-                shadow: Shadow {
-                    color: Color::BLACK,
-                    offset: Vector::ZERO,
-                    blur_radius: 10.0,
-                },
-                border: Border::default().color(color).width(2.0).rounded(10.0),
+        container::Style {
+            text_color: Some(text),
+            background: Some(Color::TRANSPARENT.into()),
+            shadow: Shadow {
+                color: Color::BLACK,
+                offset: Vector::ZERO,
+                blur_radius: 10.0,
             },
-            notification::Severity::Destructive => container::Style {
-                text_color: Some(text),
-                background: Some(color.scale_alpha(0.5).into()),
-                shadow: Shadow {
-                    color: Color::BLACK,
-                    offset: Vector::ZERO,
-                    blur_radius: 10.0,
-                },
-                border: Border::default().color(color).width(2.0).rounded(10.0),
-            },
-            notification::Severity::Error => container::Style {
-                text_color: Some(text),
-                background: Some(color.scale_alpha(0.5).into()),
-                shadow: Shadow {
-                    color: Color::BLACK,
-                    offset: Vector::ZERO,
-                    blur_radius: 10.0,
-                },
-                border: Border::default().color(color).width(2.0).rounded(10.0),
-            },
+            border: Border::default()
+                .color(bg_gradient_end)
+                .width(2.0)
+                .rounded(10.0),
         }
     })
 }
 
 pub fn notification_title<'a>(severity: Severity) -> container::StyleFn<'a, Theme> {
     Box::new(move |theme: &Theme| {
-        let Pair { color, text } = notification_bg_color(theme, severity);
+        let (bg_gradient_start, bg_gradient_end, _) = notification_bg_colors(theme, severity);
+        let palette = theme.extended_palette();
+
+        let bg = Gradient::Linear(
+            Linear::new(Radians::PI)
+                .add_stop(0.0, bg_gradient_start)
+                .add_stop(0.5, bg_gradient_end),
+        );
 
         container::Style {
-            text_color: Some(text),
-            background: Some(color.into()),
-            border: Border::default().rounded(Radius::default().top(10.0)),
+            text_color: Some(palette.background.base.color),
+            background: Some(bg.into()),
+            border: Border::default().rounded(Radius::default().top(8.0)),
             ..Default::default()
         }
     })
@@ -503,11 +494,7 @@ pub fn notification_close_button<'a>(severity: Severity) -> button::StyleFn<'a, 
             ..button::primary(theme, status)
         };
 
-        let btn_bg_a = match severity {
-            Severity::Info => palette.primary.base.color,
-            Severity::Destructive => palette.danger.base.color,
-            Severity::Error => palette.danger.base.color,
-        };
+        let btn_bg_a = notification_bg_colors(theme, severity).1;
 
         let btn_bg_b = palette.background.base.color;
 
@@ -563,6 +550,27 @@ pub fn notification_close_button<'a>(severity: Severity) -> button::StyleFn<'a, 
                 ..base.border
             },
             ..base
+        }
+    })
+}
+
+pub fn notification_content<'a>(severity: Severity) -> container::StyleFn<'a, Theme> {
+    Box::new(move |theme: &Theme| {
+        let (bg_gradient_start, bg_gradient_end, text) = notification_bg_colors(theme, severity);
+
+        let bg = Gradient::Linear(
+            Linear::new(Radians::PI)
+                .add_stop(0.0, bg_gradient_end.scale_alpha(0.4))
+                .add_stop(0.2, bg_gradient_start.scale_alpha(0.3))
+                .add_stop(0.8, bg_gradient_start.scale_alpha(0.3))
+                .add_stop(1.0, bg_gradient_end.scale_alpha(0.3)),
+        );
+
+        container::Style {
+            text_color: Some(text),
+            background: Some(bg.into()),
+            border: Border::default().rounded(Radius::new(0.0).bottom(8.0)),
+            ..Default::default()
         }
     })
 }
