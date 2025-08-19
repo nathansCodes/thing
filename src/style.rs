@@ -10,7 +10,7 @@ use palette::{IntoColor, LinSrgba, Mix, Oklab};
 
 use crate::notification::{self, Severity};
 
-pub fn base_button(theme: &Theme, status: button::Status) -> button::Style {
+fn base_button(theme: &Theme, status: button::Status, accent: Color) -> button::Style {
     let palette = theme.extended_palette();
 
     let base = button::Style {
@@ -19,12 +19,12 @@ pub fn base_button(theme: &Theme, status: button::Status) -> button::Style {
         ..button::primary(theme, status)
     };
 
-    let btn_bg_a = palette.background.base.color;
+    let btn_bg_a = theme.palette().background;
 
     let btn_bg_b = if let button::Status::Disabled = status {
         palette.secondary.base.color
     } else {
-        palette.primary.base.color
+        accent
     };
 
     let btn_gradient_a = mix_colors(
@@ -33,7 +33,7 @@ pub fn base_button(theme: &Theme, status: button::Status) -> button::Style {
         if let button::Status::Hovered | button::Status::Pressed = status {
             0.35
         } else {
-            0.15
+            0.25
         },
     );
 
@@ -67,7 +67,7 @@ pub fn base_button(theme: &Theme, status: button::Status) -> button::Style {
     let btn_text = if let button::Status::Disabled = status {
         palette.secondary.base.color
     } else {
-        palette.primary.base.color
+        accent
     };
 
     button::Style {
@@ -80,6 +80,27 @@ pub fn base_button(theme: &Theme, status: button::Status) -> button::Style {
         },
         ..base
     }
+}
+
+pub fn primary_button(theme: &Theme, status: button::Status) -> button::Style {
+    base_button(theme, status, theme.extended_palette().primary.base.color)
+}
+
+pub fn secondary_button(theme: &Theme, status: button::Status) -> button::Style {
+    let base = base_button(theme, status, theme.extended_palette().secondary.base.color);
+
+    button::Style {
+        text_color: theme.palette().text,
+        ..base
+    }
+}
+
+pub fn success_button(theme: &Theme, status: button::Status) -> button::Style {
+    base_button(theme, status, theme.extended_palette().success.base.color)
+}
+
+pub fn danger_button(theme: &Theme, status: button::Status) -> button::Style {
+    base_button(theme, status, theme.extended_palette().danger.base.color)
 }
 
 pub fn scrollable(theme: &Theme, status: widget::scrollable::Status) -> widget::scrollable::Style {
@@ -184,7 +205,7 @@ pub fn menu_button(theme: &Theme, status: button::Status) -> button::Style {
         text_color: palette.background.base.text,
         ..button::text(theme, status)
     };
-    let base = base_button(theme, status);
+    let base = primary_button(theme, status);
 
     match status {
         button::Status::Active => text,
@@ -566,6 +587,26 @@ pub fn notification_timeout_indicator<'a>(
             fill_mode: rule::FillMode::Percent(timeout / 5.0 * 100.0),
         }
     })
+}
+
+pub fn dialog(theme: &Theme) -> container::Style {
+    let default = container::dark(theme);
+    let palette = theme.extended_palette();
+
+    container::Style {
+        background: Some(palette.background.weak.color.into()),
+        border: Border {
+            color: palette.background.strong.color,
+            width: 2.0,
+            radius: 20.0.into(),
+        },
+        shadow: Shadow {
+            color: Color::BLACK,
+            offset: Vector::ZERO,
+            blur_radius: 20.0,
+        },
+        ..default
+    }
 }
 
 pub fn info_bar(theme: &Theme) -> container::Style {

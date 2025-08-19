@@ -53,7 +53,6 @@ pub enum IOError {
 
 impl From<std::io::Error> for IOError {
     fn from(value: std::io::Error) -> Self {
-        println!("{value:?}");
         Self::IO(value.kind())
     }
 }

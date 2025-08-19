@@ -5,10 +5,12 @@ mod style;
 mod widgets;
 
 use crate::notification::Notification;
+use crate::widgets::dialog::{Dialog, DialogOption};
 use crate::widgets::dnd::{dnd_indicator, dnd_receiver};
 use graph::connections::Edge;
 use graph::line_styles::AxisAligned;
 use graph::{GraphEvent, GraphNode, RelativeAttachment, line_styles};
+use iced::keyboard::key::Named;
 use widgets::*;
 
 use iced::keyboard::{Key, Modifiers};
@@ -54,6 +56,7 @@ fn main() -> iced::Result {
                     assets: AssetsPane::default(),
                     notifications: Vec::new(),
                     dnd_payload: None,
+                    dialog: None,
                 },
                 Task::none(),
             )
@@ -85,6 +88,7 @@ struct State {
     focus: Option<pane_grid::Pane>,
     notifications: Vec<Notification>,
     dnd_payload: Option<Draggable>,
+    dialog: Option<Dialog<Message>>,
     graph_zoom: f32,
 }
 
@@ -111,7 +115,8 @@ enum Message {
     ImageButtonPressed,
     Saved,
     SaveFailed(std::io::ErrorKind),
-    DataLoaded(String),
+    ParseData(String, PathBuf),
+    ConfirmLoadPath(PathBuf),
     LoadData(PathBuf),
     LoadDataFailed(IOError),
     OpenFolderFailed(IOError),
@@ -122,6 +127,7 @@ enum Message {
     TraverseGraph,
     SetDragPayload(Option<Draggable>),
     DropImageOnGraph(PathBuf, Point),
+    CloseDialog,
 }
 
 fn view(state: &State) -> Element<'_, Message> {
@@ -276,25 +282,27 @@ fn view(state: &State) -> Element<'_, Message> {
         )
     ];
 
-    column![
-        menu_bar,
-        stack![
-            dnd_indicator(
-                state.dnd_payload.clone().map(|draggable| match draggable {
-                    Draggable::ImageAsset(img_path) => container(
-                        image(img_path.to_string_lossy().to_string())
-                            .width(50.0)
-                            .opacity(0.5)
-                    )
-                    .width(50.0)
-                    .into(),
-                }),
-                container(grid)
-            ),
-            notifications
-        ]
-    ]
-    .into()
+    widgets::dialog(
+        &state.dialog,
+        column![
+            menu_bar,
+            stack![
+                dnd_indicator(
+                    state.dnd_payload.clone().map(|draggable| match draggable {
+                        Draggable::ImageAsset(img_path) => container(
+                            image(img_path.to_string_lossy().to_string())
+                                .width(50.0)
+                                .opacity(0.5)
+                        )
+                        .width(50.0)
+                        .into(),
+                    }),
+                    container(grid)
+                ),
+                notifications
+            ]
+        ],
+    )
 }
 
 fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -339,7 +347,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }),
         Message::OpenLoadFolderDialog => {
             Task::perform(pick_folder(), |path_maybe| match path_maybe {
-                Ok(path) if path.exists() && path.is_dir() => Message::LoadData(path),
+                Ok(path) if path.exists() && path.is_dir() => Message::ConfirmLoadPath(path),
                 Ok(path) if path.is_file() => {
                     Message::OpenFolderFailed(IOError::IO(std::io::ErrorKind::NotADirectory))
                 }
@@ -361,30 +369,77 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             AssetsMessage::SetPayload(payload) => Task::done(Message::SetDragPayload(payload)),
         },
-        Message::LoadData(path) => Task::batch([
-            Task::done(Message::AssetsMessage(AssetsMessage::LoadAssets(
-                path.clone(),
-            ))),
-            Task::perform(io::load(path), |res| match res {
-                Ok(raw_data) => Message::DataLoaded(raw_data),
+        Message::ConfirmLoadPath(path) => {
+            let read_dir: Vec<_> = path.as_path().read_dir().unwrap().collect();
+
+            if read_dir.iter().any(|path| {
+                path.as_ref()
+                    .is_ok_and(|entry| entry.file_name() == "data.toml")
+            }) {
+                return Task::done(Message::LoadData(path));
+            } else if read_dir.len()
+                - read_dir
+                    .iter()
+                    .filter(|entry| {
+                        entry.as_ref().is_ok_and(|entry| {
+                            entry.path().is_dir() && entry.file_name() == "images"
+                        })
+                    })
+                    .count()
+                > 0
+            {
+                state.dialog = Some(Dialog::new(
+                    "Are you sure you want to load this folder?",
+                    format!(
+                        "Directory {path:?} already contains files. Are you sure you want to use it this folder?"
+                    ),
+                    Message::CloseDialog,
+                    vec![DialogOption::new(
+                        dialog::Severity::Warn,
+                        "Load Anyway",
+                        Message::LoadData(path),
+                    )],
+                ))
+            }
+
+            Task::none()
+        }
+        Message::LoadData(path) => {
+            state.dialog = None;
+
+            let cloned_path = path.clone();
+
+            Task::perform(io::load(path.clone()), move |res| match res {
+                Ok(raw_data) => Message::ParseData(raw_data, path.clone()),
                 Err(IOError::IO(ErrorKind::NotFound)) => Message::DataNotLoaded,
                 Err(err) => Message::LoadDataFailed(err),
-            }),
-        ]),
+            })
+            .chain(Task::done(Message::AssetsMessage(
+                AssetsMessage::LoadAssets(cloned_path),
+            )))
+        }
         Message::LoadDataFailed(err) => {
             state.notifications.push(Notification::error(
                 "Failed to load data",
-                format!("Failed to load data: {err:?}",),
+                format!("Failed to load data: {err:#?}",),
             ));
             Task::none()
         }
         Message::DataNotLoaded => Task::none(),
-        Message::DataLoaded(raw_data) => {
+        Message::ParseData(raw_data, path) => {
             let data = toml::from_str(&raw_data).map_err(IOError::from);
 
             match data {
                 Ok(data) => {
                     state.nodes = data;
+
+                    state.notifications.push(Notification::info(
+                        "Successfully loaded data!",
+                        format!("Successfully loaded data from {:?}", path.clone()),
+                    ));
+
+                    state.folder = Some(path);
+
                     Task::none()
                 }
                 Err(err) => Task::done(Message::LoadDataFailed(err)),
@@ -581,6 +636,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     + state.graph_position,
             ))
         }
+        Message::CloseDialog => {
+            state.dialog = None;
+            Task::none()
+        }
     }
 }
 
@@ -592,6 +651,7 @@ fn subscription(_state: &State) -> Subscription<Message> {
                 Some(Message::OpenLoadFolderDialog)
             }
             (Modifiers::CTRL, Key::Character(char)) if char.eq("t") => Some(Message::TraverseGraph),
+            (_, Key::Named(Named::Escape)) if modifiers.is_empty() => Some(Message::CloseDialog),
             _ => None,
         }),
         iced::time::every(Duration::from_millis(20)).map(|_| Message::Tick),

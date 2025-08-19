@@ -1,11 +1,12 @@
+pub mod dialog;
 pub mod dnd;
 pub mod graph;
 
+pub use dialog::dialog;
 use iced::{
-    Alignment, Border, Element, Font,
+    Alignment, Element, Font,
     Length::Fill,
     Padding,
-    border::Radius,
     font::Weight,
     widget::{Container, button, column, container, horizontal_rule, horizontal_space, row, text},
 };
@@ -18,7 +19,7 @@ use crate::{
 };
 
 pub fn base_button<'a>(content: impl Into<Element<'a, Message>>) -> button::Button<'a, Message> {
-    button(content).padding([4, 8]).style(style::base_button)
+    button(content).padding([4, 8]).style(style::primary_button)
 }
 
 pub fn menu_button(label: &str) -> button::Button<'_, Message> {
