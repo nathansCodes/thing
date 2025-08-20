@@ -360,34 +360,37 @@ pub fn pane_focused(theme: &Theme) -> container::Style {
     }
 }
 
-pub fn node(theme: &Theme) -> container::Style {
-    let palette = theme.extended_palette();
+pub fn node<'a>(selected: bool) -> container::StyleFn<'a, Theme> {
+    Box::new(move |theme: &Theme| {
+        let palette = theme.extended_palette();
 
-    let gradient_mid = mix_colors(
-        palette.background.base.color,
-        palette.background.weak.color,
-        0.25,
-    );
+        let base_color = if selected {
+            palette.primary.base.color
+        } else {
+            palette.background.base.color
+        };
 
-    let gradient_end = mix_colors(
-        palette.background.base.color,
-        palette.background.weak.color,
-        0.6,
-    );
+        let gradient_mid = mix_colors(base_color, palette.background.weak.color, 0.25);
 
-    let bg = Gradient::Linear(
-        Linear::new(Radians::PI)
-            .add_stop(0.0, palette.background.base.color)
-            .add_stop(0.1, gradient_mid)
-            .add_stop(0.7, gradient_end),
-    );
+        let gradient_end = mix_colors(base_color, palette.background.weak.color, 0.6);
 
-    container::Style::default().background(bg).border(
-        Border::default()
-            .rounded(15.0)
-            .width(2.0)
-            .color(gradient_end),
-    )
+        let bg = Gradient::Linear(
+            Linear::new(Radians::PI)
+                .add_stop(0.0, base_color)
+                .add_stop(0.1, gradient_mid)
+                .add_stop(0.7, gradient_end),
+        );
+
+        container::Style {
+            background: Some(bg.into()),
+            border: Border::default()
+                .rounded(15.0)
+                .width(2.0)
+                .color(gradient_end),
+            text_color: selected.then_some(base_color),
+            ..Default::default()
+        }
+    })
 }
 
 pub fn graph_overlay(theme: &Theme) -> container::Style {

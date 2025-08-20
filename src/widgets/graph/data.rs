@@ -20,11 +20,17 @@ pub struct GraphNode<D: std::fmt::Debug> {
     #[serde(with = "Position")]
     pub(super) position: Point,
     pub(super) data: D,
+    #[serde(skip)]
+    pub(super) selected: bool,
 }
 
 impl<Data: std::fmt::Debug> GraphNode<Data> {
     pub fn new(position: Point, data: Data) -> Self {
-        Self { position, data }
+        Self {
+            position,
+            data,
+            selected: false,
+        }
     }
 
     pub fn position(&self) -> Point {
@@ -33,6 +39,10 @@ impl<Data: std::fmt::Debug> GraphNode<Data> {
 
     pub fn data(&self) -> &Data {
         &self.data
+    }
+
+    pub fn selected(&self) -> bool {
+        self.selected
     }
 
     pub fn move_to(&mut self, position: Point) {
@@ -191,6 +201,44 @@ where
                 conn.b.0 -= 1;
             }
         });
+    }
+
+    pub fn is_selected(&self, i: usize) -> Result<bool, GraphError> {
+        self.nodes
+            .get(i)
+            .map(GraphNode::selected)
+            .ok_or(GraphError::NodeNotFound(i))
+    }
+
+    pub fn select(&mut self, i: usize) {
+        if let Some(node) = self.nodes.get_mut(i) {
+            node.selected = true;
+        }
+    }
+
+    pub fn deselect(&mut self, i: usize) {
+        if let Some(node) = self.nodes.get_mut(i) {
+            node.selected = false;
+        }
+    }
+
+    pub fn select_all(&mut self) {
+        for node in self.nodes.iter_mut() {
+            node.selected = true;
+        }
+    }
+
+    pub fn clear_selection(&mut self) {
+        for node in self.nodes.iter_mut() {
+            node.selected = false;
+        }
+    }
+
+    pub fn selection(&self) -> impl Iterator<Item = usize> {
+        self.nodes
+            .iter()
+            .enumerate()
+            .filter_map(|(i, node)| node.selected.then_some(i))
     }
 
     pub fn traverse_iter(
