@@ -1212,7 +1212,7 @@ where
 
                     Status::Captured
                 }
-                'd' => {
+                'd' if modifiers.control() => {
                     state.debug = !state.debug;
                     Status::Captured
                 }
