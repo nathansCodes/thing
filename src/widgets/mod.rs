@@ -9,12 +9,14 @@ use iced::{
     Alignment, Element, Font,
     Length::Fill,
     Padding,
+    advanced::widget::Text,
     font::Weight,
     widget::{
-        Container, button, column, container, horizontal_rule, horizontal_space, row, scrollable,
-        text,
+        Container, button, column, container, horizontal_rule, horizontal_space, mouse_area, row,
+        scrollable, text,
     },
 };
+use iced_aw::DropDown;
 
 use crate::{
     Message,
@@ -127,4 +129,44 @@ where
     F: Fn(&GraphNode<Data>) -> Element<Message, iced::Theme, Renderer>,
 {
     Graph::new(data, view_node)
+}
+
+pub fn dropdown<'a, Message: Clone + 'a>(
+    dropdown_open: bool,
+    show_hide_dropdown: Message,
+    button_text: Text<'a, iced::Theme, iced::Renderer>,
+    options: impl Iterator<Item = (char, impl Into<String>, Message)>,
+) -> DropDown<'a, Message> {
+    let underlay = button(
+        row![
+            button_text,
+            if dropdown_open {
+                icons::up()
+            } else {
+                icons::down()
+            }
+        ]
+        .spacing(8.0),
+    )
+    .on_press(show_hide_dropdown.clone())
+    .style(style::primary_button);
+
+    let overlay = mouse_area(
+        container(column(options.map(|(icon, option_text, on_press)| {
+            button(
+                row![text(icon).font(icons::ICON_FONT), text(option_text.into())]
+                    .align_y(Alignment::Center)
+                    .spacing(6.0),
+            )
+            .style(style::menu_button)
+            .width(Fill)
+            .on_press(on_press)
+            .into()
+        })))
+        .padding(4.0)
+        .style(style::dropdown),
+    )
+    .on_press(show_hide_dropdown);
+
+    DropDown::new(underlay, overlay, dropdown_open).width(200.0)
 }

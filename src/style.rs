@@ -250,6 +250,24 @@ pub fn menu_button(theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
+pub fn dropdown(theme: &Theme) -> container::Style {
+    let palette = theme.extended_palette();
+
+    container::Style {
+        background: Some(palette.background.base.color.into()),
+        border: Border::default()
+            .width(2.0)
+            .rounded(14.0)
+            .color(palette.background.weak.color),
+        shadow: Shadow {
+            color: Color::BLACK,
+            offset: Vector::ZERO,
+            blur_radius: 10.0,
+        },
+        ..Default::default()
+    }
+}
+
 pub fn title_bar_active(theme: &Theme) -> container::Style {
     let palette = theme.extended_palette();
 
