@@ -44,6 +44,16 @@ pub async fn load(path: PathBuf) -> Result<String, IOError> {
     Ok(data)
 }
 
+pub async fn load_dir(path: PathBuf) -> Result<Vec<PathBuf>, IOError> {
+    let dir = std::fs::read_dir(path).map_err(|err| IOError::IO(err.kind()))?;
+
+    let files: Vec<PathBuf> = dir
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .collect();
+
+    Ok(files)
+}
+
 #[derive(Debug, Clone)]
 pub enum IOError {
     DialogClosed,
