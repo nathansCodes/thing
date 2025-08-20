@@ -364,7 +364,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 assets::update(&mut state.assets, AssetsMessage::LoadAssets(path))
                     .map(Message::AssetsMessage)
             }
-            AssetsMessage::LoadCompleted(_) | AssetsMessage::LoadFailed(_) => {
+            AssetsMessage::LoadCompleted(_)
+            | AssetsMessage::LoadFailed(_)
+            | AssetsMessage::FilterChanged(_) => {
                 assets::update(&mut state.assets, assets_message).map(Message::AssetsMessage)
             }
             AssetsMessage::SetPayload(payload) => Task::done(Message::SetDragPayload(payload)),

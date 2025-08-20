@@ -1,11 +1,11 @@
-use std::{io, path::PathBuf};
+use std::{ffi::OsStr, io, path::PathBuf};
 
 use iced::{
     Element,
     Length::Fill,
     Task,
     mouse::Interaction,
-    widget::{column, container, image, mouse_area, row, scrollable, text},
+    widget::{column, container, image, mouse_area, row, scrollable, text, text_input},
 };
 
 use crate::{
@@ -25,6 +25,7 @@ pub struct AssetsPane {
     view: AssetType,
     files: Vec<PathBuf>,
     error_state: Option<IOError>,
+    filter: String,
 }
 
 pub fn update(state: &mut AssetsPane, message: AssetsMessage) -> Task<AssetsMessage> {
@@ -75,45 +76,66 @@ pub fn update(state: &mut AssetsPane, message: AssetsMessage) -> Task<AssetsMess
             Task::done(AssetsMessage::OpenAsset(asset_type, path))
         }
         AssetsMessage::SetPayload(payload) => Task::done(AssetsMessage::SetPayload(payload)),
+        AssetsMessage::FilterChanged(text) => {
+            state.filter = text;
+            Task::none()
+        }
     }
 }
 
 pub fn view(state: &AssetsPane) -> Element<'_, AssetsMessage> {
-    match state.view {
+    let content = match state.view {
         AssetType::Image => scrollable(
-            row(state.files.iter().map(|path| {
-                let img = dnd_provider(
-                    AssetsMessage::SetPayload,
-                    crate::Draggable::ImageAsset(path.clone()),
-                    mouse_area(container(
-                        column![
-                            image(path)
-                                .height(100.0)
+            row(state
+                .files
+                .iter()
+                .filter(|path| {
+                    path.file_name()
+                        .unwrap_or(OsStr::new(""))
+                        .to_string_lossy()
+                        .to_lowercase()
+                        .contains(&state.filter.to_lowercase())
+                })
+                .map(|path| {
+                    let img = dnd_provider(
+                        AssetsMessage::SetPayload,
+                        crate::Draggable::ImageAsset(path.clone()),
+                        mouse_area(container(
+                            column![
+                                image(path)
+                                    .height(100.0)
+                                    .width(100.0)
+                                    .filter_method(image::FilterMethod::Nearest),
+                                text(
+                                    path.file_name()
+                                        .map(|os_str| os_str.to_string_lossy())
+                                        .unwrap_or("abcd".into()),
+                                )
                                 .width(100.0)
-                                .filter_method(image::FilterMethod::Nearest),
-                            text(
-                                path.file_name()
-                                    .map(|os_str| os_str.to_string_lossy())
-                                    .unwrap_or("abcd".into()),
-                            )
-                            .width(100.0)
-                            .center()
-                        ]
-                        .spacing(5.0)
-                        .padding(5.0),
-                    ))
-                    .on_release(AssetsMessage::OpenAsset(state.view, path.clone()))
-                    .interaction(Interaction::Pointer),
-                );
-                Element::from(img)
-            }))
+                                .center()
+                            ]
+                            .spacing(5.0)
+                            .padding(5.0),
+                        ))
+                        .on_release(AssetsMessage::OpenAsset(state.view, path.clone()))
+                        .interaction(Interaction::Pointer),
+                    );
+                    Element::from(img)
+                }))
             .spacing(5.0)
             .width(Fill)
             .wrap(),
         )
-        .style(style::scrollable)
-        .into(),
-    }
+        .style(style::scrollable),
+    };
+
+    column![
+        text_input("Search...", &state.filter)
+            .on_input(AssetsMessage::FilterChanged)
+            .style(style::text_input),
+        content,
+    ]
+    .into()
 }
 
 #[derive(Clone, Debug)]
@@ -123,4 +145,5 @@ pub enum AssetsMessage {
     LoadFailed(IOError),
     OpenAsset(AssetType, PathBuf),
     SetPayload(Option<crate::Draggable>),
+    FilterChanged(String),
 }
