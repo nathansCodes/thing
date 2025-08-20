@@ -47,3 +47,15 @@ pub const LIST: char = '\u{E806}';
 pub fn list<'a>() -> Text<'a, iced::Theme, iced::Renderer> {
     icon(LIST)
 }
+
+pub const DOWN: char = '\u{E807}';
+
+pub fn down<'a>() -> Text<'a, iced::Theme, iced::Renderer> {
+    icon(DOWN)
+}
+
+pub const UP: char = '\u{E808}';
+
+pub fn up<'a>() -> Text<'a, iced::Theme, iced::Renderer> {
+    icon(UP)
+}
