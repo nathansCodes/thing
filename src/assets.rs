@@ -8,7 +8,11 @@ use iced::{
     widget::{column, container, image, mouse_area, row, scrollable, text},
 };
 
-use crate::{io::IOError, style, widgets::dnd::dnd_provider};
+use crate::{
+    io::{IOError, load_dir},
+    style,
+    widgets::dnd::dnd_provider,
+};
 
 #[derive(Default, Debug, Clone, Copy)]
 pub enum AssetType {
@@ -110,16 +114,6 @@ pub fn view(state: &AssetsPane) -> Element<'_, AssetsMessage> {
         .style(style::scrollable)
         .into(),
     }
-}
-
-async fn load_dir(path: PathBuf) -> Result<Vec<PathBuf>, IOError> {
-    let dir = std::fs::read_dir(path).map_err(|err| IOError::IO(err.kind()))?;
-
-    let files: Vec<PathBuf> = dir
-        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-        .collect();
-
-    Ok(files)
 }
 
 #[derive(Clone, Debug)]
