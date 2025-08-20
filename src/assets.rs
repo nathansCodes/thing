@@ -1,18 +1,24 @@
 use std::{ffi::OsStr, io, path::PathBuf};
 
 use iced::{
-    Element,
+    Alignment, Element,
     Length::Fill,
     Task,
-    mouse::Interaction,
-    widget::{column, container, image, mouse_area, row, scrollable, text, text_input},
+    widget::{button, column, image, row, scrollable, text, text_input},
 };
 
 use crate::{
     io::{IOError, load_dir},
     style,
-    widgets::{dnd::dnd_provider, icons},
+    widgets::{dnd::dnd_provider, dropdown, icons},
 };
+
+#[derive(Default, Debug, Clone, Copy)]
+pub enum View {
+    #[default]
+    Thumbnails,
+    List,
+}
 
 #[derive(Default, Debug, Clone, Copy)]
 pub enum AssetType {
@@ -22,7 +28,9 @@ pub enum AssetType {
 
 #[derive(Default)]
 pub struct AssetsPane {
-    view: AssetType,
+    current_assets: AssetType,
+    view: View,
+    view_dropdown_open: bool,
     files: Vec<PathBuf>,
     error_state: Option<IOError>,
     filter: String,
@@ -35,7 +43,7 @@ pub fn update(state: &mut AssetsPane, message: AssetsMessage) -> Task<AssetsMess
                 return Task::none();
             }
 
-            let subfolder = match state.view {
+            let subfolder = match state.current_assets {
                 AssetType::Image => "images",
             };
 
@@ -80,13 +88,21 @@ pub fn update(state: &mut AssetsPane, message: AssetsMessage) -> Task<AssetsMess
             state.filter = text;
             Task::none()
         }
+        AssetsMessage::ViewChanged(view) => {
+            state.view = view;
+            Task::none()
+        }
+        AssetsMessage::ShowHideDropdown => {
+            state.view_dropdown_open = !state.view_dropdown_open;
+            Task::none()
+        }
     }
 }
 
 pub fn view(state: &AssetsPane) -> Element<'_, AssetsMessage> {
-    let content = match state.view {
-        AssetType::Image => scrollable(
-            row(state
+    let content = match state.current_assets {
+        AssetType::Image => {
+            let images = state
                 .files
                 .iter()
                 .filter(|path| {
@@ -96,52 +112,102 @@ pub fn view(state: &AssetsPane) -> Element<'_, AssetsMessage> {
                         .to_lowercase()
                         .contains(&state.filter.to_lowercase())
                 })
-                .map(|path| {
-                    let img = dnd_provider(
+                .enumerate()
+                .map(|(i, path)| {
+                    dnd_provider(
                         AssetsMessage::SetPayload,
                         crate::Draggable::ImageAsset(path.clone()),
-                        mouse_area(container(
-                            column![
-                                image(path)
-                                    .height(100.0)
+                        match state.view {
+                            View::Thumbnails => button(
+                                column![
+                                    image(path)
+                                        .height(100.0)
+                                        .width(100.0)
+                                        .filter_method(image::FilterMethod::Nearest),
+                                    text(
+                                        path.file_name()
+                                            .map(|os_str| os_str.to_string_lossy())
+                                            .unwrap_or("abcd".into()),
+                                    )
                                     .width(100.0)
-                                    .filter_method(image::FilterMethod::Nearest),
-                                text(
-                                    path.file_name()
-                                        .map(|os_str| os_str.to_string_lossy())
-                                        .unwrap_or("abcd".into()),
-                                )
-                                .width(100.0)
-                                .center()
-                            ]
-                            .spacing(5.0)
-                            .padding(5.0),
-                        ))
-                        .on_release(AssetsMessage::OpenAsset(state.view, path.clone()))
-                        .interaction(Interaction::Pointer),
-                    );
-                    Element::from(img)
-                }))
-            .spacing(5.0)
-            .width(Fill)
-            .wrap(),
-        )
-        .style(style::scrollable),
+                                    .center()
+                                ]
+                                .spacing(5.0)
+                                .padding(5.0),
+                            )
+                            .padding(0)
+                            .style(style::list_item(false))
+                            .on_press(AssetsMessage::OpenAsset(state.current_assets, path.clone())),
+                            View::List => button(
+                                row![
+                                    image(path)
+                                        .height(30)
+                                        .width(30)
+                                        .filter_method(image::FilterMethod::Nearest),
+                                    text(
+                                        path.file_name()
+                                            .map(|os_str| os_str.to_string_lossy())
+                                            .unwrap_or("abcd".into()),
+                                    )
+                                ]
+                                .width(Fill)
+                                .height(40)
+                                .spacing(10)
+                                .padding(5)
+                                .align_y(Alignment::Center),
+                            )
+                            .on_press(AssetsMessage::OpenAsset(state.current_assets, path.clone()))
+                            .padding(0)
+                            .style(style::list_item(i % 2 == 0)),
+                        },
+                    )
+                });
+
+            let layout = match state.view {
+                View::Thumbnails => Element::from(row(images).spacing(5).width(Fill).wrap()),
+                View::List => Element::from(column(images).spacing(2).width(Fill)),
+            };
+
+            scrollable(layout).style(style::scrollable)
+        }
     };
 
+    let dropdown = dropdown(
+        state.view_dropdown_open,
+        AssetsMessage::ShowHideDropdown,
+        match state.view {
+            View::Thumbnails => icons::thumbnails(),
+            View::List => icons::list(),
+        },
+        [
+            (
+                icons::THUMBNAILS,
+                "Thumbnails",
+                AssetsMessage::ViewChanged(View::Thumbnails),
+            ),
+            (icons::LIST, "List", AssetsMessage::ViewChanged(View::List)),
+        ]
+        .into_iter(),
+    );
+
     column![
-        text_input("Search...", &state.filter)
-            .on_input(AssetsMessage::FilterChanged)
-            .icon(text_input::Icon {
-                font: icons::ICON_FONT,
-                code_point: icons::SEARCH,
-                size: None,
-                spacing: 4.0,
-                side: text_input::Side::Left
-            })
-            .style(style::text_input),
+        row![
+            text_input("Search...", &state.filter)
+                .on_input(AssetsMessage::FilterChanged)
+                .icon(text_input::Icon {
+                    font: icons::ICON_FONT,
+                    code_point: icons::SEARCH,
+                    size: None,
+                    spacing: 4.0,
+                    side: text_input::Side::Left
+                })
+                .style(style::text_input),
+            dropdown
+        ]
+        .spacing(4.0),
         content,
     ]
+    .spacing(4.0)
     .into()
 }
 
@@ -153,4 +219,6 @@ pub enum AssetsMessage {
     OpenAsset(AssetType, PathBuf),
     SetPayload(Option<crate::Draggable>),
     FilterChanged(String),
+    ViewChanged(View),
+    ShowHideDropdown,
 }

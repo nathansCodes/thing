@@ -792,6 +792,67 @@ pub fn info_bar_zoom_slider(theme: &Theme, status: slider::Status) -> slider::St
     }
 }
 
+pub fn list_item<'a>(even: bool) -> button::StyleFn<'a, Theme> {
+    Box::new(move |theme: &Theme, status: button::Status| {
+        let default = button::Style::default();
+
+        let palette = theme.extended_palette();
+
+        let (color, text_color) = match status {
+            button::Status::Active | button::Status::Disabled => {
+                (theme.palette().background, theme.palette().text)
+            }
+            button::Status::Hovered | button::Status::Pressed => {
+                (palette.primary.base.color, palette.primary.base.color)
+            }
+        };
+
+        let opacity = match status {
+            button::Status::Active => 0.5,
+            button::Status::Hovered => 0.4,
+            button::Status::Pressed => 0.3,
+            button::Status::Disabled => 0.2,
+        };
+
+        let bg = Gradient::Linear(
+            Linear::new(0.0)
+                .add_stop(0.0, color.scale_alpha(opacity - 0.2))
+                .add_stop(0.4, color.scale_alpha(opacity - 0.1))
+                .add_stop(0.6, color.scale_alpha(opacity)),
+        );
+
+        let border = Border {
+            width: 2.0,
+            color: color.scale_alpha(opacity),
+            radius: Radius::new(8.0),
+        };
+
+        if even {
+            button::Style {
+                background: Some(bg.into()),
+                border,
+                text_color,
+                ..default
+            }
+        } else {
+            button::Style {
+                background: if status != button::Status::Active {
+                    Some(bg.into())
+                } else {
+                    default.background
+                },
+                border: if status != button::Status::Active {
+                    border
+                } else {
+                    Border::default()
+                },
+                text_color,
+                ..default
+            }
+        }
+    })
+}
+
 fn mix_colors(a: Color, b: Color, t: f32) -> Color {
     let a_srgba = LinSrgba::from(a.into_linear());
     let b_srgba = LinSrgba::from(b.into_linear());
