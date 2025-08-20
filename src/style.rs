@@ -220,7 +220,7 @@ pub fn menu_bar(theme: &Theme, _status: iced_aw::style::Status) -> menu_bar::Sty
         menu_background: palette.background.base.color.into(),
         menu_border: Border::default()
             .width(2.0)
-            .rounded(15.0)
+            .rounded(14.0)
             .color(palette.background.weak.color),
         menu_shadow: Shadow {
             color: Color::BLACK,
