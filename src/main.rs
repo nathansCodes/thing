@@ -22,7 +22,7 @@ use iced::{
     font::Weight,
     widget::{column, container, image, opaque, pane_grid, pane_grid::Configuration, text},
 };
-use iced::{Size, Subscription, Transformation, Vector, keyboard};
+use iced::{Settings, Size, Subscription, Transformation, Vector, keyboard};
 use iced_aw::{menu, menu::Item, menu_bar};
 use serde::{Deserialize, Serialize};
 use std::io::ErrorKind;
@@ -37,6 +37,10 @@ use crate::{
 
 fn main() -> iced::Result {
     iced::application("Hello", update, view)
+        .settings(Settings {
+            fonts: vec![include_bytes!("../fonts/things.ttf").as_slice().into()],
+            ..Default::default()
+        })
         .subscription(subscription)
         .theme(|_| Theme::TokyoNight)
         .run_with(|| {
