@@ -679,6 +679,9 @@ fn subscription(_state: &State) -> Subscription<Message> {
                 Some(Message::OpenLoadFolderDialog)
             }
             (Modifiers::CTRL, Key::Character(char)) if char.eq("t") => Some(Message::TraverseGraph),
+            (Modifiers::CTRL, Key::Character(char)) if char.eq("a") => {
+                Some(Message::GraphEvent(GraphEvent::SelectAll))
+            }
             (_, Key::Named(Named::Escape)) if modifiers.is_empty() => Some(Message::CloseDialog),
             _ => None,
         }),

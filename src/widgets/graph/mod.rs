@@ -1211,11 +1211,6 @@ where
                 modifiers,
                 ..
             }) => match char.chars().next().unwrap() {
-                'a' if modifiers.control() => {
-                    shell.publish(on_event(GraphEvent::SelectAll));
-
-                    Status::Captured
-                }
                 'd' if modifiers.control() => {
                     state.debug = !state.debug;
                     Status::Captured
