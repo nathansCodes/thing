@@ -527,14 +527,17 @@ where
         Status::Captured
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn on_mouse_button_released(
         &self,
+        cursor: Cursor,
         btn: mouse::Button,
         state: &mut GraphState<Attachment>,
         new_payload: Payload<Attachment>,
         shell: &mut Shell<'_, Message>,
         layout: Layout<'_>,
         status: Status,
+        viewport: &Rectangle,
     ) -> Status {
         // i love you rust
         let (Button::Left | Button::Middle) = btn else {
@@ -618,7 +621,11 @@ where
                 }
             }
             CursorState::Hovering(Payload::Node(id, old_status))
-                if old_status == &Status::Ignored && status == Status::Ignored =>
+                if viewport
+                    .intersection(&layout.bounds())
+                    .is_some_and(|bounds| cursor.is_over(bounds))
+                    && old_status == &Status::Ignored
+                    && status == Status::Ignored =>
             {
                 if let Some(on_event) = &self.on_event {
                     if !state.shift_pressed {
@@ -631,7 +638,11 @@ where
                     }
                 }
             }
-            CursorState::Hovering(Payload::Background) => {
+            CursorState::Hovering(Payload::Background)
+                if viewport
+                    .intersection(&layout.bounds())
+                    .is_some_and(|bounds| cursor.is_over(bounds)) =>
+            {
                 if let Some(on_event) = &self.on_event {
                     shell.publish(on_event(GraphEvent::ClearSelection));
                 }
@@ -1114,13 +1125,16 @@ where
 
                 Status::Captured
             }
-            Event::Mouse(mouse::Event::ButtonReleased(btn))
-                if viewport
-                    .intersection(&layout.bounds())
-                    .is_some_and(|bounds| cursor.is_over(bounds)) =>
-            {
-                self.on_mouse_button_released(btn, state, new_payload, shell, layout, status)
-            }
+            Event::Mouse(mouse::Event::ButtonReleased(btn)) => self.on_mouse_button_released(
+                cursor,
+                btn,
+                state,
+                new_payload,
+                shell,
+                layout,
+                status,
+                viewport,
+            ),
             Event::Mouse(mouse::Event::WheelScrolled { delta }) => 'ev: {
                 let Some(cursor_pos) = cursor.position() else {
                     break 'ev Status::Ignored;
