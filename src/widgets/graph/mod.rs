@@ -1070,7 +1070,7 @@ where
         renderer: &Renderer,
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
-        _viewport: &Rectangle,
+        viewport: &Rectangle,
     ) -> Status {
         let state = tree.state.downcast_mut::<GraphState<Attachment>>();
 
@@ -1114,7 +1114,11 @@ where
 
                 Status::Captured
             }
-            Event::Mouse(mouse::Event::ButtonReleased(btn)) => {
+            Event::Mouse(mouse::Event::ButtonReleased(btn))
+                if viewport
+                    .intersection(&layout.bounds())
+                    .is_some_and(|bounds| cursor.is_over(bounds)) =>
+            {
                 self.on_mouse_button_released(btn, state, new_payload, shell, layout, status)
             }
             Event::Mouse(mouse::Event::WheelScrolled { delta }) => 'ev: {
