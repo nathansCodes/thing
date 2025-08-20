@@ -145,6 +145,40 @@ pub fn scrollable(theme: &Theme, status: widget::scrollable::Status) -> widget::
     }
 }
 
+pub fn text_input(theme: &Theme, status: widget::text_input::Status) -> widget::text_input::Style {
+    use widget::text_input::*;
+
+    let palette = theme.extended_palette();
+
+    let border_color = match status {
+        Status::Active => palette.background.strong.color,
+        Status::Hovered => palette.primary.weak.color,
+        Status::Focused => palette.primary.base.color,
+        Status::Disabled => palette.secondary.base.color,
+    };
+
+    let bg_color = mix_colors(palette.background.base.color, border_color, 0.05);
+
+    let bg = Gradient::Linear(
+        Linear::new(Radians::PI)
+            .add_stop(0.0, mix_colors(bg_color, Color::BLACK, 0.3))
+            .add_stop(0.25, bg_color),
+    );
+
+    Style {
+        background: bg.into(),
+        border: Border {
+            color: border_color,
+            width: 1.0,
+            radius: Radius::new(8.0),
+        },
+        icon: border_color,
+        placeholder: palette.secondary.weak.color,
+        value: palette.background.base.text,
+        selection: palette.primary.base.color,
+    }
+}
+
 pub fn menu_bar(theme: &Theme, _status: iced_aw::style::Status) -> menu_bar::Style {
     let palette = theme.extended_palette();
 
