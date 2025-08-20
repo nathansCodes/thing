@@ -11,7 +11,7 @@ use iced::{
 use crate::{
     io::{IOError, load_dir},
     style,
-    widgets::dnd::dnd_provider,
+    widgets::{dnd::dnd_provider, icons},
 };
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -132,6 +132,13 @@ pub fn view(state: &AssetsPane) -> Element<'_, AssetsMessage> {
     column![
         text_input("Search...", &state.filter)
             .on_input(AssetsMessage::FilterChanged)
+            .icon(text_input::Icon {
+                font: icons::ICON_FONT,
+                code_point: icons::SEARCH,
+                size: None,
+                spacing: 4.0,
+                side: text_input::Side::Left
+            })
             .style(style::text_input),
         content,
     ]

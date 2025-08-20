@@ -1,6 +1,8 @@
 pub mod dialog;
 pub mod dnd;
 pub mod graph;
+#[allow(unused)]
+pub mod icons;
 
 pub use dialog::dialog;
 use iced::{
@@ -73,13 +75,11 @@ pub fn notification(i: usize, notification: &Notification) -> Container<'_, Mess
                 .font(title_font)
                 .align_y(Alignment::Center),
             horizontal_space(),
-            // TODO: find icons to use
             base_button(
-                text("X")
+                icons::close()
                     .align_y(Alignment::Center)
                     .align_x(Alignment::Center)
-                    .font(x_font)
-                    .size(14.0)
+                    .size(15.0)
             )
             .style(style::notification_close_button(notification.severity))
             .width(25.0)
