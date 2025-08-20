@@ -72,13 +72,9 @@ where
 {
     pub(super) fn new<F>(data: &'a GraphData<Data, Attachment>, view_node: F) -> Self
     where
-        F: Fn(&Data) -> Element<Message, Theme, Renderer>,
+        F: Fn(&'a GraphNode<Data>) -> Element<Message, Theme, Renderer>,
     {
-        let content = data
-            .nodes
-            .iter()
-            .map(|node| view_node(&node.data))
-            .collect();
+        let content = data.nodes.iter().map(view_node).collect();
 
         Self {
             position: Vector::ZERO,
@@ -379,22 +375,22 @@ where
                         new_position.y = new_position.y.max(0.0);
 
                         // un-select other nodes if current one isn't part of the selection
-                        if !state.selection.contains(id) {
-                            state.selection.clear();
+                        if !self.data.is_selected(*id).is_ok_and(|selected| selected) {
+                            shell.publish(on_event(GraphEvent::ClearSelection));
                         }
 
                         // make sure no nodes get negative positions
                         let mut correction = Vector::ZERO;
 
-                        let selections_positions: Vec<_> = state
-                            .selection
-                            .iter()
-                            .filter_map(|selected: &usize| {
-                                if selected == id {
+                        let selections_positions: Vec<_> = self
+                            .data
+                            .selection()
+                            .filter_map(|selected: usize| {
+                                if selected == *id {
                                     return None;
                                 }
 
-                                let node = &self.data.nodes[*selected];
+                                let node = &self.data.nodes[selected];
 
                                 let new_position =
                                     node.position + (new_position - self.data.nodes[*id].position);
@@ -406,7 +402,7 @@ where
                                     correction.y = correction.y.max(-new_position.y);
                                 }
 
-                                Some((*selected, new_position))
+                                Some((selected, new_position))
                             })
                             .collect();
 
@@ -596,7 +592,7 @@ where
 
                 let rect = Rectangle::new(top_left, (bottom_right - top_left).into());
 
-                let mut selected: Vec<_> = layout
+                let selected: Vec<_> = layout
                     .children()
                     .zip(self.data.nodes.iter())
                     .enumerate()
@@ -611,30 +607,34 @@ where
                     })
                     .collect();
 
-                if state.shift_pressed {
-                    state.selection.append(&mut selected);
+                if let Some(on_event) = &self.on_event {
+                    if !state.shift_pressed {
+                        shell.publish(on_event(GraphEvent::ClearSelection));
+                    }
 
-                    // remove duplicates
-                    state.selection.sort();
-                    state.selection.dedup();
-                } else {
-                    state.selection = selected;
+                    for id in &selected {
+                        shell.publish(on_event(GraphEvent::Select(*id)));
+                    }
                 }
             }
             CursorState::Hovering(Payload::Node(id, old_status))
                 if old_status == &Status::Ignored && status == Status::Ignored =>
             {
-                if !state.shift_pressed {
-                    state.selection.clear();
-                }
-                if let Some(index) = state.selection.iter().position(|s| s == id) {
-                    state.selection.remove(index);
-                } else {
-                    state.selection.push(*id);
+                if let Some(on_event) = &self.on_event {
+                    if !state.shift_pressed {
+                        shell.publish(on_event(GraphEvent::ClearSelection));
+                    }
+                    if let Some(index) = self.data.selection().position(|s| s == *id) {
+                        shell.publish(on_event(GraphEvent::Deselect(index)));
+                    } else {
+                        shell.publish(on_event(GraphEvent::Select(*id)));
+                    }
                 }
             }
             CursorState::Hovering(Payload::Background) => {
-                state.selection.clear();
+                if let Some(on_event) = &self.on_event {
+                    shell.publish(on_event(GraphEvent::ClearSelection));
+                }
             }
             _ => (),
         }
@@ -856,11 +856,10 @@ where
 
         self.content
             .iter()
-            .enumerate()
             .zip(tree.children.iter())
             .zip(layout.children())
             .zip(self.data.nodes.iter())
-            .filter_map(|((((i, element), tree), node_layout), data)| {
+            .filter_map(|(((element, tree), node_layout), data)| {
                 transform_node_bounds(
                     node_layout.bounds(),
                     self.zoom,
@@ -868,9 +867,9 @@ where
                     data.position,
                 )
                 .intersection(&layout.bounds())
-                .map(|bounds| (i, element, tree, node_layout, data, bounds))
+                .map(|bounds| (element, tree, node_layout, bounds))
             })
-            .for_each(|(i, node, tree, node_layout, data, bounds)| {
+            .for_each(|(node, tree, node_layout, bounds)| {
                 renderer.with_layer(bounds, |renderer| {
                     renderer.with_transformation(Transformation::scale(self.zoom), |renderer| {
                         let node_pos = Vector::new(layout.position().x, layout.position().y);
@@ -901,24 +900,6 @@ where
                             },
                         );
                     });
-                    if state.selection.contains(&i) {
-                        renderer.fill_quad(
-                            Quad {
-                                bounds: transform_node_bounds(
-                                    node_layout.bounds(),
-                                    self.zoom,
-                                    self.position,
-                                    data.position,
-                                ),
-                                border: Border::default()
-                                    .color(palette.primary.base.color)
-                                    .width(3.0)
-                                    .rounded(5.0),
-                                ..Default::default()
-                            },
-                            Color::TRANSPARENT,
-                        );
-                    }
                 });
             });
 
@@ -1170,18 +1151,18 @@ where
                 ..
             }) => {
                 if let Some(on_event) = &self.on_event {
-                    for (selection_index, selected_node_id) in state.selection.iter().enumerate() {
+                    for (selection_index, selected_node_id) in self.data.selection().enumerate() {
                         // find how many of the previous selections have an id less than the
                         // current one and subtract the current one from that. we don't want an
                         // an out of bounds memory access
-                        let correction = state
-                            .selection
-                            .iter()
+                        let correction = self
+                            .data
+                            .selection()
                             .take(selection_index)
                             .filter(|s| *s < selected_node_id)
                             .count();
 
-                        let corrected_node_id = *selected_node_id - correction.min(selection_index);
+                        let corrected_node_id = selected_node_id - correction.min(selection_index);
 
                         // disconnect
                         for (connection_id, _, _, _) in
@@ -1192,13 +1173,13 @@ where
 
                         match new_payload {
                             Payload::Node(id, _) | Payload::Attachment(id, _)
-                                if id == *selected_node_id =>
+                                if id == selected_node_id =>
                             {
                                 state.cursor_state = CursorState::Hovering(Payload::Background)
                             }
                             Payload::Connection(id)
-                                if self.data.connections[id].a.0 == *selected_node_id
-                                    || self.data.connections[id].b.0 == *selected_node_id =>
+                                if self.data.connections[id].a.0 == selected_node_id
+                                    || self.data.connections[id].b.0 == selected_node_id =>
                             {
                                 state.cursor_state = CursorState::Hovering(Payload::Background);
                             }
@@ -1210,7 +1191,7 @@ where
                         }));
                     }
 
-                    state.selection.clear();
+                    shell.publish(on_event(GraphEvent::ClearSelection));
                     Status::Captured
                 } else {
                     Status::Ignored
@@ -1227,9 +1208,7 @@ where
                 ..
             }) => match char.chars().next().unwrap() {
                 'a' if modifiers.control() => {
-                    state.selection.clear();
-
-                    state.selection.extend(0..self.data.nodes.len());
+                    shell.publish(on_event(GraphEvent::SelectAll));
 
                     Status::Captured
                 }
@@ -1392,6 +1371,10 @@ where
         id: usize,
         attachment: Attachment,
     },
+    Select(usize),
+    Deselect(usize),
+    ClearSelection,
+    SelectAll,
 }
 
 fn transform_node_bounds(

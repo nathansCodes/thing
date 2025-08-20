@@ -18,7 +18,7 @@ use crate::{
     Message,
     notification::Notification,
     style,
-    widgets::graph::{Graph, GraphData},
+    widgets::graph::{Graph, GraphData, GraphNode},
 };
 
 pub fn base_button<'a>(content: impl Into<Element<'a, Message>>) -> button::Button<'a, Message> {
@@ -124,7 +124,7 @@ where
     Renderer: iced::advanced::image::Renderer + iced::advanced::graphics::geometry::Renderer,
     Data: std::fmt::Debug,
     Attachment: graph::Attachment + PartialEq + 'static,
-    F: Fn(&Data) -> Element<Message, iced::Theme, Renderer>,
+    F: Fn(&GraphNode<Data>) -> Element<Message, iced::Theme, Renderer>,
 {
     Graph::new(data, view_node)
 }

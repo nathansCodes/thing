@@ -13,7 +13,6 @@ where
     pub(super) shift_pressed: bool,
     pub(super) cursor_pos: Point,
     pub(super) debug: bool,
-    pub(super) selection: Vec<usize>,
 }
 
 impl<Attachment: connections::Attachment> Default for GraphState<Attachment> {
@@ -26,7 +25,6 @@ impl<Attachment: connections::Attachment> Default for GraphState<Attachment> {
             shift_pressed: false,
             cursor_pos: Point::ORIGIN,
             debug: false,
-            selection: Vec::new(),
         }
     }
 }

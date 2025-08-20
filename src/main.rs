@@ -568,6 +568,22 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 println!("Connection dropped: {id}-{attachment:?}");
                 Task::none()
             }
+            GraphEvent::Select(id) => {
+                state.nodes.select(id);
+                Task::none()
+            }
+            GraphEvent::Deselect(id) => {
+                state.nodes.deselect(id);
+                Task::none()
+            }
+            GraphEvent::ClearSelection => {
+                state.nodes.clear_selection();
+                Task::none()
+            }
+            GraphEvent::SelectAll => {
+                state.nodes.select_all();
+                Task::none()
+            }
         },
         Message::ImageButtonPressed => {
             println!("pressd");
@@ -668,8 +684,8 @@ fn subscription(_state: &State) -> Subscription<Message> {
     ])
 }
 
-fn view_node(node: &Node) -> Element<'_, Message> {
-    match node {
+fn view_node(node: &GraphNode<Node>) -> Element<'_, Message> {
+    match node.data() {
         Node::Character(img) => container(
             column![
                 image(img.path.clone())
@@ -692,7 +708,7 @@ fn view_node(node: &Node) -> Element<'_, Message> {
         .width(150.0)
         .height(150.0)
         .padding(5.0)
-        .style(style::node)
+        .style(style::node(node.selected()))
         .into(),
         Node::Family => container("")
             .width(10.0)
