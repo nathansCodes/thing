@@ -7,7 +7,7 @@ use iced::{
         mouse::Cursor,
         widget::{
             Tree,
-            tree::{State, Tag},
+            tree::{self, Tag},
         },
     },
     mouse,
@@ -24,9 +24,10 @@ where
 }
 
 #[derive(Default)]
-struct DragAndDropProviderState {
+struct State {
     lmb_pressed: bool,
     is_hovered: bool,
+    is_dragging: bool,
 }
 
 impl<'a, Payload, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
@@ -77,11 +78,11 @@ where
     }
 
     fn tag(&self) -> iced::advanced::widget::tree::Tag {
-        Tag::of::<DragAndDropProviderState>()
+        Tag::of::<State>()
     }
 
-    fn state(&self) -> State {
-        State::Some(Box::new(DragAndDropProviderState::default()))
+    fn state(&self) -> tree::State {
+        tree::State::Some(Box::new(State::default()))
     }
 
     fn children(&self) -> Vec<Tree> {
@@ -118,53 +119,60 @@ where
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) -> Status {
-        let state = tree.state.downcast_mut::<DragAndDropProviderState>();
+        let state = tree.state.downcast_mut::<State>();
 
-        if !(state.is_hovered
-            && event == Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)))
-            && let Status::Captured = self.content.as_widget_mut().on_event(
-                &mut tree.children[0],
-                event.clone(),
-                layout.children().next().unwrap(),
-                cursor,
-                renderer,
-                clipboard,
-                shell,
-                viewport,
-            )
-        {
-            return Status::Captured;
+        let mut status = Status::Ignored;
+
+        if let Status::Captured = self.content.as_widget_mut().on_event(
+            &mut tree.children[0],
+            event.clone(),
+            layout.children().next().unwrap(),
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        ) {
+            status = Status::Captured;
         }
 
         if let Event::Mouse(ev) = event {
             match ev {
                 mouse::Event::ButtonPressed(mouse::Button::Left) => {
                     state.lmb_pressed = state.is_hovered;
-                    Status::Captured
+
+                    status = Status::Captured;
                 }
                 mouse::Event::ButtonReleased(mouse::Button::Left) => {
                     shell.publish((self.set_payload)(None));
+
                     state.lmb_pressed = false;
-                    Status::Captured
+                    state.is_dragging = false;
+
+                    status = Status::Captured;
                 }
-                mouse::Event::CursorMoved { .. } => {
+                mouse::Event::CursorMoved { position } => {
                     let was_hovered = state.is_hovered;
                     state.is_hovered = layout
                         .bounds()
                         .intersection(viewport)
-                        .is_some_and(|bounds| cursor.position_over(bounds).is_some());
+                        .is_some_and(|bounds| bounds.contains(position));
 
-                    if was_hovered && !state.is_hovered && state.lmb_pressed {
+                    if was_hovered && !state.is_hovered {
+                        state.is_dragging = state.lmb_pressed;
+                    }
+
+                    if state.is_dragging {
                         shell.publish((self.set_payload)(Some(self.payload.clone())));
                     }
 
-                    Status::Captured
+                    status = Status::Captured;
                 }
-                _ => Status::Ignored,
+                _ => (),
             }
-        } else {
-            Status::Ignored
         }
+
+        status
     }
 
     fn overlay<'b>(
