@@ -438,8 +438,12 @@ where
                         CursorState::Hovering(new_payload)
                     };
                 }
-                Payload::Node(id, status) => {
-                    state.drag_origin = self.data.nodes[*id].position;
+                Payload::Node(id, status) => 'cursor_state: {
+                    let Some(node) = self.data.nodes.get(*id) else {
+                        state.cursor_state = CursorState::Hovering(Payload::Background);
+                        break 'cursor_state;
+                    };
+                    state.drag_origin = node.position;
                     state.drag_start_point = cursor_pos;
 
                     if status == &Status::Captured {
