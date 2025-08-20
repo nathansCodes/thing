@@ -137,14 +137,24 @@ enum Message {
 fn view(state: &State) -> Element<'_, Message> {
     #[rustfmt::skip]
     let menu_bar = menu_bar![
-        (menu_button("File"), menu!(
-            (menu_item_button("Open Folder", Some("CTRL+O")).on_press(Message::OpenLoadFolderDialog))
-            (menu_item_button("Add Image", None).on_press(Message::OpenAddImageDialog))
-            (menu_item_button("Save", Some("CTRL+S")).on_press(Message::Save))
-        ).width(200.0).spacing(2.0))
-        (menu_button("Graph"), menu!(
-            (menu_item_button("Select All", Some("CTRL+A")).on_press(Message::GraphEvent(GraphEvent::SelectAll)))
-        ).width(200.0).spacing(2.0))
+        (
+            menu_button("File"),
+            menu!(
+                (menu_item_button("Open Folder", Some("CTRL+O")).on_press(Message::OpenLoadFolderDialog))
+                (menu_item_button("Add Image", None).on_press(Message::OpenAddImageDialog))
+                (menu_item_button("Save", Some("CTRL+S")).on_press(Message::Save))
+            )
+            .width(200.0)
+            .spacing(2.0)
+        )
+        (
+            menu_button("Graph"),
+            menu!(
+                (menu_item_button("Select All", Some("CTRL+A")).on_press(Message::GraphEvent(GraphEvent::SelectAll)))
+            )
+            .width(200.0)
+            .spacing(2.0)
+        )
     ].width(Fill).style(style::menu_bar).padding([2.5, 5.0]).spacing(5.0);
 
     let grid = pane_grid(&state.panes, |id, pane, _| {
