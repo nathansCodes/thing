@@ -41,6 +41,10 @@ impl<Data: std::fmt::Debug> GraphNode<Data> {
         &self.data
     }
 
+    pub fn data_mut(&mut self) -> &mut Data {
+        &mut self.data
+    }
+
     pub fn selected(&self) -> bool {
         self.selected
     }

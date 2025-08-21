@@ -4,6 +4,7 @@ mod notification;
 mod style;
 mod widgets;
 
+use crate::assets::{Asset, Image};
 use crate::notification::Notification;
 use crate::widgets::dialog::{Dialog, DialogOption};
 use crate::widgets::dnd::{dnd_indicator, dnd_receiver};
@@ -30,7 +31,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::{
-    assets::{AssetType, AssetsMessage, AssetsPane},
+    assets::{AssetsData, AssetsMessage},
     graph::GraphData,
     io::{IOError, pick_file, pick_folder},
 };
@@ -48,7 +49,6 @@ fn main() -> iced::Result {
                 State {
                     graph_position: Vector::ZERO,
                     graph_zoom: 1.0,
-                    folder: None,
                     nodes: GraphData::default(),
                     panes: pane_grid::State::with_configuration(Configuration::Split {
                         axis: pane_grid::Axis::Vertical,
@@ -57,7 +57,7 @@ fn main() -> iced::Result {
                         b: Box::new(Configuration::Pane(Pane::Graph)),
                     }),
                     focus: None,
-                    assets: AssetsPane::default(),
+                    assets: AssetsData::default(),
                     notifications: Vec::new(),
                     dnd_payload: None,
                     dialog: None,
@@ -67,28 +67,22 @@ fn main() -> iced::Result {
         })
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct Image {
-    path: PathBuf,
-}
-
 #[derive(Clone, Debug)]
 enum Draggable {
-    ImageAsset(PathBuf),
+    Asset(assets::Asset),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum Node {
-    Character(Image),
+    Character(assets::Image),
     Family,
 }
 
 struct State {
-    folder: Option<PathBuf>,
     graph_position: Vector,
     nodes: GraphData<Node, RelativeAttachment<line_styles::AxisAligned>>,
     panes: pane_grid::State<Pane>,
-    assets: assets::AssetsPane,
+    assets: assets::AssetsData,
     focus: Option<pane_grid::Pane>,
     notifications: Vec<Notification>,
     dnd_payload: Option<Draggable>,
@@ -106,7 +100,8 @@ enum Pane {
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone)]
 enum Message {
-    AddImage(PathBuf, Point),
+    AddExternalImage(PathBuf, Point),
+    AddImage(Image, Point),
     MenuButtonPressed,
     OpenAddImageDialog,
     OpenLoadFolderDialog,
@@ -130,7 +125,7 @@ enum Message {
     Tick,
     TraverseGraph,
     SetDragPayload(Option<Draggable>),
-    DropImageOnGraph(PathBuf, Point),
+    DropImageOnGraph(assets::Image, Point),
     CloseDialog,
 }
 
@@ -242,9 +237,11 @@ fn view(state: &State) -> Element<'_, Message> {
 
                 Element::from(dnd_receiver(
                     |payload, relative_cursor_pos| match payload {
-                        Draggable::ImageAsset(path) => {
-                            Some(Message::DropImageOnGraph(path, relative_cursor_pos))
-                        }
+                        Draggable::Asset(asset) => match asset {
+                            Asset::Image(img) => {
+                                Some(Message::DropImageOnGraph(img, relative_cursor_pos))
+                            }
+                        },
                     },
                     state.dnd_payload.clone(),
                     stack![
@@ -306,13 +303,12 @@ fn view(state: &State) -> Element<'_, Message> {
             stack![
                 dnd_indicator(
                     state.dnd_payload.clone().map(|draggable| match draggable {
-                        Draggable::ImageAsset(img_path) => container(
-                            image(img_path.to_string_lossy().to_string())
-                                .width(50.0)
-                                .opacity(0.5)
-                        )
-                        .width(50.0)
-                        .into(),
+                        Draggable::Asset(asset) => match asset {
+                            Asset::Image(img) =>
+                                container(image(img.handle).width(50.0).opacity(0.5))
+                                    .width(50.0)
+                                    .into(),
+                        },
                     }),
                     container(grid)
                 ),
@@ -324,18 +320,17 @@ fn view(state: &State) -> Element<'_, Message> {
 
 fn update(state: &mut State, message: Message) -> Task<Message> {
     match message {
-        Message::AddImage(path, pos) => {
-            if !path.exists() {
-                Task::done(Message::AddImageFailed(IOError::IO(
-                    std::io::ErrorKind::NotFound,
-                )))
-            } else {
-                state
-                    .nodes
-                    .add(Node::Character(Image { path: path.clone() }), pos);
-
-                Task::none()
-            }
+        Message::AddExternalImage(path, pos) => {
+            Task::perform(io::load_file(path), move |asset_maybe| match asset_maybe {
+                Ok(asset) => match asset {
+                    Asset::Image(img) => Message::AddImage(img, pos),
+                },
+                Err(err) => Message::AddImageFailed(err),
+            })
+        }
+        Message::AddImage(img, pos) => {
+            state.nodes.add(Node::Character(img), pos);
+            Task::none()
         }
         Message::AddImageFailed(err) => {
             state.notifications.push(Notification::error(
@@ -359,7 +354,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::PaneDragged(_) => Task::none(),
         Message::OpenAddImageDialog => Task::perform(pick_file(), |path_maybe| match path_maybe {
-            Ok(path) => Message::AddImage(path, Point::ORIGIN),
+            Ok(path) => Message::AddExternalImage(path, Point::ORIGIN),
             Err(err) => Message::AddImageFailed(err),
         }),
         Message::OpenLoadFolderDialog => {
@@ -373,13 +368,21 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             })
         }
         Message::AssetsMessage(assets_message) => match assets_message {
-            AssetsMessage::OpenAsset(asset_type, path) => match asset_type {
-                AssetType::Image => Task::done(Message::AddImage(path, Point::ORIGIN)),
+            AssetsMessage::OpenAsset(_, asset) => match asset {
+                Asset::Image(img) => Task::done(Message::AddImage(img, Point::ORIGIN)),
             },
             AssetsMessage::LoadAssets(path) => {
-                state.folder = Some(path.clone());
-                assets::update(&mut state.assets, AssetsMessage::LoadAssets(path))
+                state.assets.set_folder(path.clone());
+                assets::update(&mut state.assets, AssetsMessage::LoadAssets(path.clone()))
                     .map(Message::AssetsMessage)
+                    .chain(Task::perform(
+                        io::load(path.clone()),
+                        move |res| match res {
+                            Ok(raw_data) => Message::ParseData(raw_data, path.clone()),
+                            Err(IOError::IO(ErrorKind::NotFound)) => Message::DataNotLoaded,
+                            Err(err) => Message::LoadDataFailed(err),
+                        },
+                    ))
             }
             AssetsMessage::SetPayload(payload) => Task::done(Message::SetDragPayload(payload)),
             _ => assets::update(&mut state.assets, assets_message).map(Message::AssetsMessage),
@@ -422,16 +425,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::LoadData(path) => {
             state.dialog = None;
 
-            let cloned_path = path.clone();
-
-            Task::perform(io::load(path.clone()), move |res| match res {
-                Ok(raw_data) => Message::ParseData(raw_data, path.clone()),
-                Err(IOError::IO(ErrorKind::NotFound)) => Message::DataNotLoaded,
-                Err(err) => Message::LoadDataFailed(err),
-            })
-            .chain(Task::done(Message::AssetsMessage(
-                AssetsMessage::LoadAssets(cloned_path),
-            )))
+            Task::done(Message::AssetsMessage(AssetsMessage::LoadAssets(path)))
         }
         Message::LoadDataFailed(err) => {
             let message = match err {
@@ -442,6 +436,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 IOError::IO(error_kind) => {
                     format!("IO error occurred: {error_kind:#?}")
                 }
+                IOError::InvalidAsset => "File is not a valid Asset.".to_string(),
             };
 
             state.notifications.push(Notification::error(
@@ -452,7 +447,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::DataNotLoaded => Task::none(),
         Message::ParseData(raw_data, path) => {
-            let data = toml::from_str(&raw_data).map_err(IOError::from);
+            let data: Result<
+                GraphData<Node, RelativeAttachment<line_styles::AxisAligned>>,
+                IOError,
+            > = toml::from_str(&raw_data).map_err(IOError::from);
 
             match data {
                 Ok(data) => {
@@ -463,7 +461,25 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                         format!("Successfully loaded data from {:?}", path.clone()),
                     ));
 
-                    state.folder = Some(path);
+                    state.assets.set_folder(path.clone());
+
+                    state
+                        .nodes
+                        .iter_mut()
+                        .filter_map(|node| match node.data_mut() {
+                            Node::Character(img) => Some(img),
+                            _ => None,
+                        })
+                        .for_each(|img| {
+                            let key = "images/".to_owned() + &img.file_name.clone();
+
+                            #[allow(irrefutable_let_patterns)]
+                            if let Some(asset) = state.assets.assets().get(&key)
+                                && let Asset::Image(asset_img) = asset
+                            {
+                                img.handle = asset_img.handle.clone();
+                            }
+                        });
 
                     Task::none()
                 }
@@ -608,9 +624,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::Save => {
             let parsed = toml::to_string(&state.nodes).unwrap();
 
-            if let Some(folder) = &state.folder {
+            if let Some(folder) = &state.assets.folder() {
                 Task::perform(
-                    io::save(folder.clone().join("data.toml"), parsed),
+                    io::save(folder.join("data.toml"), parsed),
                     |res| match res {
                         Ok(()) => Message::Saved,
                         Err(err) => Message::SaveFailed(err.kind()),
@@ -625,7 +641,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 "Saved successfully!",
                 format!(
                     "successfully saved to {}",
-                    state.folder.as_ref().unwrap().to_string_lossy()
+                    state.assets.folder().unwrap().to_string_lossy()
                 ),
             ));
             Task::none()
@@ -635,7 +651,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 "Failed to save data",
                 format!(
                     "Failed to save to {}: {err}",
-                    state.folder.as_ref().unwrap().to_string_lossy()
+                    state.assets.folder().unwrap().to_string_lossy()
                 ),
             ));
             Task::none()
@@ -706,15 +722,13 @@ fn view_node(node: &GraphNode<Node>) -> Element<'_, Message> {
     match node.data() {
         Node::Character(img) => container(
             column![
-                image(img.path.clone())
+                image(img.handle.clone())
                     .width(Fill)
                     .height(Fill)
                     .filter_method(image::FilterMethod::Nearest),
                 opaque(
                     column![
-                        text(img.path.file_name().unwrap().to_str().unwrap().to_owned())
-                            .center()
-                            .width(Fill),
+                        text(&img.name).center().width(Fill),
                         base_button("ahkdlfjs").on_press(Message::ImageButtonPressed)
                     ]
                     .width(Fill)
