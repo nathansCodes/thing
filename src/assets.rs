@@ -1,4 +1,4 @@
-use std::{ffi::OsStr, io, path::PathBuf};
+use std::{collections::HashMap, io, path::PathBuf};
 
 use iced::{
     Alignment, Element,
@@ -6,6 +6,7 @@ use iced::{
     Task,
     widget::{button, column, image, row, scrollable, text, text_input},
 };
+use serde::{Deserialize, Serialize};
 
 use crate::{
     io::{IOError, load_dir},
@@ -13,46 +14,87 @@ use crate::{
     widgets::{dnd::dnd_provider, dropdown, icons},
 };
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Image {
+    pub name: String,
+    pub file_name: String,
+    #[serde(skip)]
+    #[serde(default = "default_image")]
+    pub handle: image::Handle,
+}
+
+fn default_image() -> image::Handle {
+    image::Handle::from_bytes(include_bytes!("../assets/default.png").as_slice())
+}
+
 #[derive(Default, Debug, Clone, Copy)]
-pub enum View {
+pub enum ViewMode {
     #[default]
     Thumbnails,
     List,
 }
 
 #[derive(Default, Debug, Clone, Copy)]
-pub enum AssetType {
+pub enum AssetKind {
     #[default]
     Image,
 }
 
-#[derive(Default)]
-pub struct AssetsPane {
-    current_assets: AssetType,
-    view: View,
-    view_dropdown_open: bool,
-    files: Vec<PathBuf>,
-    error_state: Option<IOError>,
-    filter: String,
+#[derive(Debug, Clone)]
+pub enum Asset {
+    Image(Image),
 }
 
-pub fn update(state: &mut AssetsPane, message: AssetsMessage) -> Task<AssetsMessage> {
+#[derive(Default)]
+pub struct AssetsData {
+    view: AssetKind,
+    view_mode: ViewMode,
+    view_dropdown_open: bool,
+    assets: HashMap<String, Asset>,
+    error_state: Option<IOError>,
+    filter: String,
+    folder: Option<PathBuf>,
+}
+
+impl AssetsData {
+    pub fn assets(&self) -> &HashMap<String, Asset> {
+        &self.assets
+    }
+
+    pub fn set_folder(&mut self, folder: PathBuf) {
+        self.folder = Some(folder);
+    }
+
+    pub fn folder(&self) -> Option<&PathBuf> {
+        self.folder.as_ref()
+    }
+
+    pub fn get_path(&self, key: impl Into<String>) -> Option<PathBuf> {
+        let key = key.into();
+
+        self.assets
+            .keys()
+            .find(|k| (*k).eq(&key.clone()))
+            .and_then(|key| self.folder.clone().map(|folder| folder.join(key)))
+    }
+}
+
+pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMessage> {
     match message {
         AssetsMessage::LoadAssets(mut path) => {
             if !path.is_dir() {
                 return Task::none();
             }
 
-            let subfolder = match state.current_assets {
-                AssetType::Image => "images",
+            let subfolder = match state.view {
+                AssetKind::Image => "images",
             };
 
-            path.push(PathBuf::from(subfolder));
+            path.push(subfolder);
 
             let create_dir = async |path| -> io::Result<()> { std::fs::create_dir(path) };
 
             if !path.exists() {
-                println!("/images subdirectory not found");
                 Task::perform(create_dir(path.clone()), move |result| match result {
                     Ok(_) => {
                         let mut path = path.clone();
@@ -72,16 +114,16 @@ pub fn update(state: &mut AssetsPane, message: AssetsMessage) -> Task<AssetsMess
                 })
             }
         }
-        AssetsMessage::LoadCompleted(path_bufs) => {
-            state.files = path_bufs;
+        AssetsMessage::LoadCompleted(assets) => {
+            state.assets = assets;
             Task::none()
         }
         AssetsMessage::LoadFailed(error) => {
             state.error_state = Some(error);
             Task::none()
         }
-        AssetsMessage::OpenAsset(asset_type, path) => {
-            Task::done(AssetsMessage::OpenAsset(asset_type, path))
+        AssetsMessage::OpenAsset(file_name, asset) => {
+            Task::done(AssetsMessage::OpenAsset(file_name, asset))
         }
         AssetsMessage::SetPayload(payload) => Task::done(AssetsMessage::SetPayload(payload)),
         AssetsMessage::FilterChanged(text) => {
@@ -89,7 +131,7 @@ pub fn update(state: &mut AssetsPane, message: AssetsMessage) -> Task<AssetsMess
             Task::none()
         }
         AssetsMessage::ViewChanged(view) => {
-            state.view = view;
+            state.view_mode = view;
             Task::none()
         }
         AssetsMessage::ShowHideDropdown => {
@@ -99,73 +141,87 @@ pub fn update(state: &mut AssetsPane, message: AssetsMessage) -> Task<AssetsMess
     }
 }
 
-pub fn view(state: &AssetsPane) -> Element<'_, AssetsMessage> {
-    let content = match state.current_assets {
-        AssetType::Image => {
-            let images = state
-                .files
+fn image_item<'a>(
+    i: usize,
+    key: impl Into<String>,
+    path: PathBuf,
+    view: ViewMode,
+    img: &'a Image,
+) -> Element<'a, AssetsMessage, iced::Theme, iced::Renderer> {
+    dnd_provider(
+        AssetsMessage::SetPayload,
+        crate::Draggable::Asset(Asset::Image(img.clone())),
+        match view {
+            ViewMode::Thumbnails => button(
+                column![
+                    image(path.clone())
+                        .height(100.0)
+                        .width(100.0)
+                        .filter_method(image::FilterMethod::Nearest),
+                    text(img.file_name.clone()).width(100.0).center()
+                ]
+                .spacing(5.0)
+                .padding(5.0),
+            )
+            .padding(0)
+            .style(style::list_item(false))
+            .on_press(AssetsMessage::OpenAsset(
+                key.into(),
+                Asset::Image(img.clone()),
+            )),
+            ViewMode::List => button(
+                row![
+                    image(path.clone())
+                        .height(30)
+                        .width(30)
+                        .filter_method(image::FilterMethod::Nearest),
+                    text(img.file_name.clone())
+                ]
+                .width(Fill)
+                .height(40)
+                .spacing(10)
+                .padding(5)
+                .align_y(Alignment::Center),
+            )
+            .on_press(AssetsMessage::OpenAsset(
+                key.into(),
+                Asset::Image(img.clone()),
+            ))
+            .padding(0)
+            .style(style::list_item(i % 2 == 0)),
+        },
+    )
+}
+
+pub fn view(state: &AssetsData) -> Element<'_, AssetsMessage> {
+    let content = match state.view {
+        AssetKind::Image => {
+            let mut images: Vec<_> = state
+                .assets
                 .iter()
-                .filter(|path| {
-                    path.file_name()
-                        .unwrap_or(OsStr::new(""))
-                        .to_string_lossy()
+                .filter(|(file_name, _)| {
+                    file_name
                         .to_lowercase()
                         .contains(&state.filter.to_lowercase())
                 })
+                .collect();
+
+            images.sort_by(|a, b| a.0.cmp(b.0));
+
+            let images = images
+                .into_iter()
                 .enumerate()
-                .map(|(i, path)| {
-                    dnd_provider(
-                        AssetsMessage::SetPayload,
-                        crate::Draggable::ImageAsset(path.clone()),
-                        match state.view {
-                            View::Thumbnails => button(
-                                column![
-                                    image(path)
-                                        .height(100.0)
-                                        .width(100.0)
-                                        .filter_method(image::FilterMethod::Nearest),
-                                    text(
-                                        path.file_name()
-                                            .map(|os_str| os_str.to_string_lossy())
-                                            .unwrap_or("abcd".into()),
-                                    )
-                                    .width(100.0)
-                                    .center()
-                                ]
-                                .spacing(5.0)
-                                .padding(5.0),
-                            )
-                            .padding(0)
-                            .style(style::list_item(false))
-                            .on_press(AssetsMessage::OpenAsset(state.current_assets, path.clone())),
-                            View::List => button(
-                                row![
-                                    image(path)
-                                        .height(30)
-                                        .width(30)
-                                        .filter_method(image::FilterMethod::Nearest),
-                                    text(
-                                        path.file_name()
-                                            .map(|os_str| os_str.to_string_lossy())
-                                            .unwrap_or("abcd".into()),
-                                    )
-                                ]
-                                .width(Fill)
-                                .height(40)
-                                .spacing(10)
-                                .padding(5)
-                                .align_y(Alignment::Center),
-                            )
-                            .on_press(AssetsMessage::OpenAsset(state.current_assets, path.clone()))
-                            .padding(0)
-                            .style(style::list_item(i % 2 == 0)),
-                        },
-                    )
+                .filter_map(|(i, (key, asset))| {
+                    state.get_path(key).map(|path| match asset {
+                        Asset::Image(image) => {
+                            image_item(i, key, path.clone(), state.view_mode, image)
+                        }
+                    })
                 });
 
-            let layout = match state.view {
-                View::Thumbnails => Element::from(row(images).spacing(5).width(Fill).wrap()),
-                View::List => Element::from(column(images).spacing(2).width(Fill)),
+            let layout = match state.view_mode {
+                ViewMode::Thumbnails => Element::from(row(images).spacing(5).width(Fill).wrap()),
+                ViewMode::List => Element::from(column(images).spacing(2).width(Fill)),
             };
 
             scrollable(layout).style(style::scrollable)
@@ -175,17 +231,21 @@ pub fn view(state: &AssetsPane) -> Element<'_, AssetsMessage> {
     let dropdown = dropdown(
         state.view_dropdown_open,
         AssetsMessage::ShowHideDropdown,
-        match state.view {
-            View::Thumbnails => icons::thumbnails(),
-            View::List => icons::list(),
+        match state.view_mode {
+            ViewMode::Thumbnails => icons::thumbnails(),
+            ViewMode::List => icons::list(),
         },
         [
             (
                 icons::THUMBNAILS,
                 "Thumbnails",
-                AssetsMessage::ViewChanged(View::Thumbnails),
+                AssetsMessage::ViewChanged(ViewMode::Thumbnails),
             ),
-            (icons::LIST, "List", AssetsMessage::ViewChanged(View::List)),
+            (
+                icons::LIST,
+                "List",
+                AssetsMessage::ViewChanged(ViewMode::List),
+            ),
         ]
         .into_iter(),
     );
@@ -214,11 +274,11 @@ pub fn view(state: &AssetsPane) -> Element<'_, AssetsMessage> {
 #[derive(Clone, Debug)]
 pub enum AssetsMessage {
     LoadAssets(PathBuf),
-    LoadCompleted(Vec<PathBuf>),
+    LoadCompleted(HashMap<String, Asset>),
     LoadFailed(IOError),
-    OpenAsset(AssetType, PathBuf),
+    OpenAsset(String, Asset),
     SetPayload(Option<crate::Draggable>),
     FilterChanged(String),
-    ViewChanged(View),
+    ViewChanged(ViewMode),
     ShowHideDropdown,
 }
