@@ -151,12 +151,12 @@ where
 
                     status = Status::Captured;
                 }
-                mouse::Event::CursorMoved { position } => {
+                mouse::Event::CursorMoved { .. } => {
                     let was_hovered = state.is_hovered;
                     state.is_hovered = layout
                         .bounds()
                         .intersection(viewport)
-                        .is_some_and(|bounds| bounds.contains(position));
+                        .is_some_and(|bounds| cursor.position_over(bounds).is_some());
 
                     if was_hovered && !state.is_hovered {
                         state.is_dragging = state.lmb_pressed;
