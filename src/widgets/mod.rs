@@ -25,20 +25,22 @@ use crate::{
     widgets::graph::{Graph, GraphData, GraphNode},
 };
 
-pub fn base_button<'a>(content: impl Into<Element<'a, Message>>) -> button::Button<'a, Message> {
+pub fn base_button<'a, Message>(
+    content: impl Into<Element<'a, Message>>,
+) -> button::Button<'a, Message> {
     button(content).padding([4, 8]).style(style::primary_button)
 }
 
-pub fn menu_button(label: &str) -> button::Button<'_, Message> {
+pub fn menu_button<'a, Message>(label: &'a str, message: Message) -> button::Button<'a, Message> {
     let mut font = Font::DEFAULT;
     font.weight = Weight::Medium;
 
     base_button(text(label).align_y(Alignment::Center).size(15.0).font(font))
-        .on_press(Message::MenuButtonPressed)
+        .on_press(message)
         .style(style::menu_button)
 }
 
-pub fn menu_item_button<'a>(
+pub fn menu_item_button<'a, Message: 'a>(
     label: &'a str,
     flavor_text: Option<&'a str>,
 ) -> button::Button<'a, Message> {

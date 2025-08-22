@@ -138,7 +138,7 @@ fn view(state: &State) -> Element<'_, Message> {
     #[rustfmt::skip]
     let menu_bar = menu_bar![
         (
-            menu_button("File"),
+            menu_button("File", Message::MenuButtonPressed),
             menu!(
                 (menu_item_button("Open Folder", Some("CTRL+O")).on_press(Message::OpenLoadFolderDialog))
                 (menu_item_button("Add Image", None).on_press(Message::OpenAddImageDialog))
@@ -148,7 +148,7 @@ fn view(state: &State) -> Element<'_, Message> {
             .spacing(2.0)
         )
         (
-            menu_button("Graph"),
+            menu_button("Graph", Message::MenuButtonPressed),
             menu!(
                 (menu_item_button("Select All", Some("CTRL+A")).on_press(Message::GraphEvent(GraphEvent::SelectAll)))
             )
