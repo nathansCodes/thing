@@ -1269,6 +1269,7 @@ where
             positions.reserve_exact(num_nodes - 1);
 
             let mut correction = Vector::ZERO;
+            let mut last_corrected_node = 0;
 
             while !queue.is_empty() {
                 if visited.len() == self.data.nodes.len() {
@@ -1329,12 +1330,56 @@ where
                 }
 
                 queue.pop_front();
+
+                if queue.is_empty() {
+                    for position in positions.iter_mut().skip(last_corrected_node) {
+                        *position = *position - correction;
+                    }
+                    last_corrected_node = positions.len();
+
+                    correction = Vector::ZERO;
+
+                    if let Some((next, node)) = self
+                        .data
+                        .nodes
+                        .iter()
+                        .enumerate()
+                        .find(|(id, _)| !visited.contains(id))
+                    {
+                        visited.push(next);
+
+                        let new_position = Point::ORIGIN
+                            + node_positioning(
+                                None,
+                                next,
+                                node,
+                                layout.children().nth(next).unwrap().bounds().size(),
+                                self.data,
+                                &layout,
+                                visited.clone(),
+                            );
+
+                        if new_position.x < 0.0 {
+                            correction.x = new_position.x;
+                        }
+                        if new_position.y < 0.0 {
+                            correction.y = new_position.y;
+                        }
+
+                        positions.push(new_position);
+                        queue.push_back(next);
+                    }
+                }
+            }
+
+            for position in positions.iter_mut().skip(last_corrected_node) {
+                *position = *position - correction;
             }
 
             for (id, new_position) in visited.iter().zip(positions) {
                 shell.publish(on_event(GraphEvent::MoveNode {
                     id: *id,
-                    new_position: new_position - correction,
+                    new_position,
                     was_dragged: false,
                 }));
             }
