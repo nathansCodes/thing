@@ -11,6 +11,7 @@ use crate::widgets::dnd::{dnd_indicator, dnd_receiver};
 use graph::connections::Edge;
 use graph::line_styles::AxisAligned;
 use graph::{GraphEvent, GraphNode, RelativeAttachment, line_styles};
+use iced::Length::Shrink;
 use iced::keyboard::key::Named;
 use widgets::*;
 
@@ -285,7 +286,7 @@ fn view(state: &State) -> Element<'_, Message> {
     let notifications = row![
         horizontal_space(),
         opaque(
-            scrollable(
+            container(scrollable(
                 column(
                     state
                         .notifications
@@ -293,10 +294,11 @@ fn view(state: &State) -> Element<'_, Message> {
                         .enumerate()
                         .map(|(i, notification)| widgets::notification(i, notification).into())
                 )
+                .height(Shrink)
                 .spacing(10.0)
                 .padding(5.0)
-            )
-            .height(500.0)
+            ))
+            .max_height(500.0)
         )
     ];
 
