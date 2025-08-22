@@ -286,18 +286,21 @@ fn view(state: &State) -> Element<'_, Message> {
     let notifications = row![
         horizontal_space(),
         opaque(
-            container(scrollable(
-                column(
-                    state
-                        .notifications
-                        .iter()
-                        .enumerate()
-                        .map(|(i, notification)| widgets::notification(i, notification).into())
+            container(
+                scrollable(
+                    column(
+                        state
+                            .notifications
+                            .iter()
+                            .enumerate()
+                            .map(|(i, notification)| widgets::notification(i, notification).into())
+                    )
+                    .height(Shrink)
+                    .spacing(10.0)
+                    .padding(5.0)
                 )
-                .height(Shrink)
-                .spacing(10.0)
-                .padding(5.0)
-            ))
+                .style(style::scrollable)
+            )
             .max_height(500.0)
         )
     ];
