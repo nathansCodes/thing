@@ -443,7 +443,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 IOError::DeserializationFailed(ref error) => {
                     format!("error at {:?}: {}", error.span(), error.message())
                 }
-                IOError::DialogClosed => "".to_string(),
+                IOError::DialogClosed => return Task::none(),
                 IOError::IO(error_kind) => {
                     format!("IO error occurred: {error_kind:#?}")
                 }
@@ -454,6 +454,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 "Failed to load data",
                 format!("Failed to load data: {message}",),
             ));
+
             Task::none()
         }
         Message::DataNotLoaded => Task::none(),
@@ -498,10 +499,15 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         }
         Message::OpenFolderFailed(err) => {
+            if let IOError::DialogClosed = err {
+                return Task::none();
+            }
+
             state.notifications.push(Notification::error(
                 "Failed to open folder",
                 format!("Failed to open folder: {err:?}",),
             ));
+
             Task::none()
         }
         Message::GraphEvent(ev) => match ev {
