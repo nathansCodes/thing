@@ -23,7 +23,7 @@ use iced::{
     font::Weight,
     widget::{column, container, image, opaque, pane_grid, pane_grid::Configuration, text},
 };
-use iced::{Settings, Size, Subscription, Transformation, Vector, keyboard};
+use iced::{Rectangle, Settings, Size, Subscription, Transformation, Vector, keyboard};
 use iced_aw::{menu, menu::Item, menu_bar};
 use serde::{Deserialize, Serialize};
 use std::io::ErrorKind;
@@ -369,7 +369,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::AssetsMessage(assets_message) => match assets_message {
             AssetsMessage::OpenAsset(_, asset) => match asset {
-                Asset::Image(img) => Task::done(Message::AddImage(img, Point::ORIGIN)),
+                Asset::Image(img) => {
+                    Task::done(Message::AddImage(img, Point::ORIGIN + state.graph_position))
+                }
             },
             AssetsMessage::LoadAssets(path) => {
                 state.assets.set_folder(path.clone());
@@ -675,7 +677,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::TraverseGraph => {
             state
                 .nodes
-                .iter_bfs(0)
+                .iter_bfs(state.nodes.selection().next().unwrap_or(0))
                 .for_each(|(i, node)| println!("for_each {i}: {:?}", node.data()));
             Task::none()
         }
@@ -764,7 +766,7 @@ fn family_tree(
         &RelativeAttachment<AxisAligned>,
         Size<f32>,
     )>,
-    _id: usize,
+    id: usize,
     node: &GraphNode<Node>,
     size: iced::Size,
     data: &GraphData<Node, RelativeAttachment<line_styles::AxisAligned>>,
@@ -772,7 +774,22 @@ fn family_tree(
     visited: Vec<usize>,
 ) -> Vector {
     let Some((prev_id, prev, attachment, prev_attachment, prev_size)) = prev else {
-        return Vector::ZERO;
+        let total_covered_space = visited
+            .iter()
+            .filter_map(|other_id| {
+                (other_id != &id).then_some(()).and_then(|_| {
+                    layout
+                        .children()
+                        .nth(*other_id)
+                        .map(|layout| layout.bounds())
+                })
+            })
+            .fold(
+                Rectangle::new(layout.position(), Size::ZERO),
+                |acc, bounds| acc.union(&bounds),
+            );
+
+        return Vector::new(total_covered_space.width + 75.0, 0.0);
     };
 
     match node.data() {
@@ -795,78 +812,37 @@ fn family_tree(
                             .then_some((
                                 conn.1,
                                 layout.children().nth(conn.1).unwrap().bounds().size(),
-                                false,
+                                None,
                             ))
                         })
                         .collect();
 
-                    let mut num_partners = 0.0;
-
-                    for (i, (child_id, _, _)) in children.clone().iter().enumerate() {
-                        for (att, other_id, _) in data.get_connections(*child_id) {
-                            if let Node::Family = data.get(other_id).unwrap().data()
-                                && att.is_horizontal()
-                            {
-                                let Some(partner_id) = data.get_connections(other_id).find_map(
-                                    |(family_att, partner_id, _)| {
-                                        (family_att.is_top() && other_id != *child_id)
-                                            .then_some(partner_id)
-                                    },
-                                ) else {
-                                    continue;
-                                };
-
-                                let partner_size =
-                                    layout.children().nth(partner_id).unwrap().bounds().size();
-
-                                let elem = (partner_id, partner_size, true);
-
-                                if !children.contains(&elem) {
-                                    if att.is_right() {
-                                        children.insert(i, elem);
-                                        num_partners += 1.0;
-                                    } else if att.is_left() {
-                                        children.insert(i + 1, elem);
-                                        num_partners += 1.0;
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    let num_visited_partners =
+                        add_partners_to_children(&mut children, data, layout, &visited) as f32;
 
                     let padding = 25.0;
 
-                    let leftmost = -children
+                    let leftmost = -(children
                         .iter()
                         .fold(0.0, |acc, (_, size, _)| acc + size.width)
-                        / 2.0
-                        - (children.len() as f32 - 1.0) * padding;
+                        + (children.len() as f32 - 1.0) * padding)
+                        / 2.0;
 
-                    let mut visited_children: Vec<_> = children
+                    let visited_children: Vec<_> = children
                         .iter()
-                        .filter(|(child_id, _, _)| visited.contains(child_id))
+                        .filter(|(child_id, _, partner_edge)| {
+                            visited.contains(child_id)
+                                || partner_edge.as_ref().is_some_and(|partners_partner| {
+                                    visited.contains(partners_partner)
+                                })
+                        })
                         .collect();
 
-                    let num_visited_children = visited_children.len();
-
-                    visited_children.extend(
-                        children
-                            .iter()
-                            .enumerate()
-                            .filter(|(i, (id, _, is_partner))| {
-                                *i < num_visited_children && *is_partner && !visited.contains(id)
-                            })
-                            .map(|(_, a)| a),
-                    );
-
-                    let num_visited_children = visited_children.len();
-
                     let x = leftmost
-                        + visited_children.iter().fold(0.0, |acc, (_, size, _)| {
-                            acc + size.width
-                                + padding
-                                    * ((num_visited_children > 0) as i32 as f32 + num_partners)
-                        });
+                        + visited_children
+                            .iter()
+                            .fold(0.0, |acc, (_, size, _)| acc + size.width + padding)
+                        + padding * num_visited_partners;
 
                     Vector::new(x, 75.0)
                 }
@@ -890,24 +866,126 @@ fn family_tree(
         },
         Node::Family => {
             if let Node::Character(_) = prev.data() {
-                let x = match prev_attachment {
+                match prev_attachment {
                     RelativeAttachment::Edge {
                         edge: Edge::Left, ..
-                    } => -30.0,
+                    } => Vector::new(-30.0, prev_size.height + 25.0),
                     RelativeAttachment::Edge {
                         edge: Edge::Right, ..
-                    } => 20.0 + prev_size.width,
-                    // TODO:
+                    } => Vector::new(20.0 + prev_size.width, prev_size.height + 25.0),
                     RelativeAttachment::Edge {
                         edge: Edge::Top, ..
-                    } => todo!(),
-                    _ => unreachable!(),
-                };
+                    } => {
+                        let mut children: Vec<_> = data
+                            .get_connections(id)
+                            .filter_map(|conn| {
+                                matches!(
+                                    conn.0,
+                                    RelativeAttachment::Edge {
+                                        edge: Edge::Bottom,
+                                        ..
+                                    }
+                                )
+                                .then_some((
+                                    conn.1,
+                                    layout.children().nth(conn.1).unwrap().bounds().size(),
+                                    false,
+                                ))
+                            })
+                            .collect();
 
-                Vector::new(x, prev_size.height + 25.0)
+                        let mut num_partners = 0.0;
+
+                        for (i, (child_id, _, _)) in children.clone().iter().enumerate() {
+                            for (att, other_id, _) in data.get_connections(*child_id) {
+                                if let Node::Family = data.get(other_id).unwrap().data()
+                                    && att.is_horizontal()
+                                {
+                                    let Some(partner_id) = data.get_connections(other_id).find_map(
+                                        |(family_att, partner_id, _)| {
+                                            (family_att.is_top() && other_id != *child_id)
+                                                .then_some(partner_id)
+                                        },
+                                    ) else {
+                                        continue;
+                                    };
+
+                                    let partner_size =
+                                        layout.children().nth(partner_id).unwrap().bounds().size();
+
+                                    let elem = (partner_id, partner_size, true);
+
+                                    if !children.contains(&elem) {
+                                        if att.is_right() && i < children.len() {
+                                            children.insert(i, elem);
+                                            num_partners += 1.0;
+                                        } else if att.is_left() {
+                                            children.insert(i + 1, elem);
+                                            num_partners += 1.0;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        let padding = 25.0;
+
+                        let children_width = children
+                            .iter()
+                            .fold(0.0, |acc, (_, size, _)| acc + size.width)
+                            + (children.len() as f32 + num_partners) * padding;
+
+                        Vector::new(children_width / 2.0, -75.0)
+                    }
+                    _ => unreachable!(),
+                }
             } else {
                 unreachable!()
             }
         }
     }
+}
+
+fn add_partners_to_children<S: graph::line_styles::LineStyle + PartialEq + Send>(
+    children: &mut Vec<(usize, Size, Option<usize>)>,
+    data: &GraphData<Node, RelativeAttachment<S>>,
+    layout: &iced::advanced::Layout<'_>,
+    visited: &[usize],
+) -> usize {
+    let mut num_visited_partners = 0;
+
+    for (i, (child_id, _, _)) in children.clone().iter().enumerate() {
+        for (att, other_id, _) in data.get_connections(*child_id) {
+            if let Node::Family = data.get(other_id).unwrap().data()
+                && att.is_horizontal()
+            {
+                let Some(partner_id) =
+                    data.get_connections(other_id)
+                        .find_map(|(family_att, partner_id, _)| {
+                            (family_att.is_top() && other_id != *child_id).then_some(partner_id)
+                        })
+                else {
+                    continue;
+                };
+
+                let partner_size = layout.children().nth(partner_id).unwrap().bounds().size();
+
+                if !children.iter().any(|(id, _, _)| *id == partner_id) {
+                    if att.is_right() && i < children.len() {
+                        children.insert(i + 1, (partner_id, partner_size, Some(*child_id)));
+                        if visited.contains(child_id) {
+                            num_visited_partners += 1;
+                        }
+                    } else if att.is_left() {
+                        children.insert(i, (partner_id, partner_size, Some(*child_id)));
+                        if visited.contains(child_id) {
+                            num_visited_partners += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    num_visited_partners
 }
