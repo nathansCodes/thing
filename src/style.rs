@@ -445,25 +445,6 @@ pub fn node<'a>(selected: bool) -> container::StyleFn<'a, Theme> {
     })
 }
 
-pub fn graph_overlay(theme: &Theme) -> container::Style {
-    let palette = theme.extended_palette();
-
-    container::Style {
-        background: Some(palette.background.base.color.into()),
-        border: Border {
-            width: 2.0,
-            color: palette.primary.weak.color,
-            radius: Radius::new(8.0),
-        },
-        shadow: Shadow {
-            color: Color::BLACK,
-            offset: Vector::ZERO,
-            blur_radius: 10.0,
-        },
-        ..Default::default()
-    }
-}
-
 /// (bg_gradient_start, bg_gradient_end, text_color)
 fn notification_bg_colors(theme: &Theme, severity: Severity) -> (Color, Color, Color) {
     let palette = theme.extended_palette();
