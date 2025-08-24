@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io, path::PathBuf};
+use std::{collections::HashMap, io, ops::Index, path::PathBuf};
 
 use iced::{
     Alignment, Element,
@@ -16,11 +16,28 @@ use crate::{
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Image {
-    pub name: String,
     pub file_name: String,
     #[serde(skip)]
     #[serde(default = "default_image")]
     pub handle: image::Handle,
+}
+
+impl TryFrom<&Asset> for Image {
+    type Error = ();
+
+    #[allow(unreachable_patterns)]
+    fn try_from(asset: &Asset) -> Result<Self, Self::Error> {
+        match asset {
+            Asset::Image(image) => Ok(image.clone()),
+            _ => Err(()),
+        }
+    }
+}
+
+impl From<Image> for Asset {
+    fn from(image: Image) -> Self {
+        Asset::Image(image)
+    }
 }
 
 fn default_image() -> image::Handle {
@@ -45,37 +62,92 @@ pub enum Asset {
     Image(Image),
 }
 
+impl Asset {
+    pub fn folder(&self) -> String {
+        match self {
+            Self::Image(_) => "images".to_string(),
+        }
+    }
+
+    pub fn kind(&self) -> AssetKind {
+        match self {
+            Self::Image(_) => AssetKind::Image,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct AssetHandle(u32);
+
 #[derive(Default)]
 pub struct AssetsData {
     view: AssetKind,
     view_mode: ViewMode,
     view_dropdown_open: bool,
     assets: HashMap<String, Asset>,
+    index: HashMap<u32, String>,
     error_state: Option<IOError>,
     filter: String,
     folder: Option<PathBuf>,
 }
 
+impl Index<AssetHandle> for AssetsData {
+    type Output = Asset;
+
+    fn index(&self, index: AssetHandle) -> &Self::Output {
+        &self.assets[&self.index[&index.0]]
+    }
+}
+
 impl AssetsData {
-    pub fn assets(&self) -> &HashMap<String, Asset> {
-        &self.assets
+    pub fn get(&self, handle: AssetHandle) -> Option<&Asset> {
+        self.index
+            .get(&handle.0)
+            .and_then(|asset_path| self.assets.get(asset_path))
     }
 
-    pub fn set_folder(&mut self, folder: PathBuf) {
-        self.folder = Some(folder);
+    pub fn handle(&self, asset_path: String) -> Option<AssetHandle> {
+        self.assets.get(&asset_path).and_then(|_| {
+            self.index
+                .iter()
+                .find_map(|(id, path)| path.eq(&asset_path).then_some(AssetHandle(*id)))
+        })
+    }
+
+    pub fn add(
+        &mut self,
+        file_name: impl Into<String>,
+        asset: impl Into<Asset>,
+    ) -> Result<AssetHandle, IOError> {
+        let folder = self.folder.as_ref().ok_or(IOError::NoFolderLoaded)?;
+
+        let asset: Asset = asset.into();
+
+        let mut asset_path = asset.folder() + "/";
+
+        asset_path.push_str(&file_name.into());
+
+        let path = folder.join(&asset_path);
+
+        if !std::fs::exists(&path).is_ok_and(|exists| exists) {
+            return Err(IOError::OSError(2));
+        }
+
+        let ids: Vec<&u32> = self.index.keys().collect();
+        let id = (0..).into_iter().find(|id| !ids.contains(&id)).unwrap();
+
+        self.assets.insert(asset_path.clone(), asset);
+        self.index.insert(id, asset_path);
+
+        Ok(AssetHandle(id))
     }
 
     pub fn folder(&self) -> Option<&PathBuf> {
         self.folder.as_ref()
     }
 
-    pub fn get_path(&self, key: impl Into<String>) -> Option<PathBuf> {
-        let key = key.into();
-
-        self.assets
-            .keys()
-            .find(|k| (*k).eq(&key.clone()))
-            .and_then(|key| self.folder.clone().map(|folder| folder.join(key)))
+    pub fn set_folder(&mut self, folder: PathBuf) {
+        self.folder = Some(folder);
     }
 }
 
@@ -115,16 +187,18 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
             }
         }
         AssetsMessage::LoadCompleted(assets) => {
-            state.assets = assets;
+            for (id, (asset_path, asset)) in assets.into_iter() {
+                state.index.insert(id, asset_path.clone());
+                state.assets.insert(asset_path, asset);
+            }
+
             Task::none()
         }
         AssetsMessage::LoadFailed(error) => {
             state.error_state = Some(error);
             Task::none()
         }
-        AssetsMessage::OpenAsset(file_name, asset) => {
-            Task::done(AssetsMessage::OpenAsset(file_name, asset))
-        }
+        AssetsMessage::OpenAsset(handle) => Task::done(AssetsMessage::OpenAsset(handle)),
         AssetsMessage::SetPayload(payload) => Task::done(AssetsMessage::SetPayload(payload)),
         AssetsMessage::FilterChanged(text) => {
             state.filter = text;
@@ -143,18 +217,17 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
 
 fn image_item<'a>(
     i: usize,
-    key: impl Into<String>,
-    path: PathBuf,
+    handle: AssetHandle,
     view: ViewMode,
     img: &'a Image,
 ) -> Element<'a, AssetsMessage, iced::Theme, iced::Renderer> {
     dnd_provider(
         AssetsMessage::SetPayload,
-        crate::Draggable::Asset(Asset::Image(img.clone())),
+        crate::Draggable::Asset(handle),
         match view {
             ViewMode::Thumbnails => button(
                 column![
-                    image(path.clone())
+                    image(&img.handle)
                         .height(100.0)
                         .width(100.0)
                         .filter_method(image::FilterMethod::Nearest),
@@ -165,13 +238,10 @@ fn image_item<'a>(
             )
             .padding(0)
             .style(style::list_item(false))
-            .on_press(AssetsMessage::OpenAsset(
-                key.into(),
-                Asset::Image(img.clone()),
-            )),
+            .on_press(AssetsMessage::OpenAsset(handle)),
             ViewMode::List => button(
                 row![
-                    image(path.clone())
+                    image(&img.handle)
                         .height(30)
                         .width(30)
                         .filter_method(image::FilterMethod::Nearest),
@@ -183,10 +253,7 @@ fn image_item<'a>(
                 .padding(5)
                 .align_y(Alignment::Center),
             )
-            .on_press(AssetsMessage::OpenAsset(
-                key.into(),
-                Asset::Image(img.clone()),
-            ))
+            .on_press(AssetsMessage::OpenAsset(handle))
             .padding(0)
             .style(style::list_item(i % 2 == 0)),
         },
@@ -197,27 +264,28 @@ pub fn view(state: &AssetsData) -> Element<'_, AssetsMessage> {
     let content = match state.view {
         AssetKind::Image => {
             let mut images: Vec<_> = state
-                .assets
+                .index
                 .iter()
-                .filter(|(file_name, _)| {
-                    file_name
-                        .to_lowercase()
-                        .contains(&state.filter.to_lowercase())
+                .filter_map(|(id, asset_path)| {
+                    state.assets.get(asset_path).and_then(|asset| {
+                        asset_path
+                            .to_lowercase()
+                            .contains(&state.filter.to_lowercase())
+                            .then_some(())
+                            // WARNING: change to .and_then when adding new types of assets
+                            .map(|_| match asset {
+                                Asset::Image(img) => (*id, img),
+                            })
+                    })
                 })
                 .collect();
 
-            images.sort_by(|a, b| a.0.cmp(b.0));
+            images.sort_by(|a, b| a.0.cmp(&b.0));
 
             let images = images
                 .into_iter()
                 .enumerate()
-                .filter_map(|(i, (key, asset))| {
-                    state.get_path(key).map(|path| match asset {
-                        Asset::Image(image) => {
-                            image_item(i, key, path.clone(), state.view_mode, image)
-                        }
-                    })
-                });
+                .map(|(i, (id, img))| image_item(i, AssetHandle(id), state.view_mode, img));
 
             let layout = match state.view_mode {
                 ViewMode::Thumbnails => Element::from(row(images).spacing(5).width(Fill).wrap()),
@@ -274,9 +342,9 @@ pub fn view(state: &AssetsData) -> Element<'_, AssetsMessage> {
 #[derive(Clone, Debug)]
 pub enum AssetsMessage {
     LoadAssets(PathBuf),
-    LoadCompleted(HashMap<String, Asset>),
+    LoadCompleted(HashMap<u32, (String, Asset)>),
     LoadFailed(IOError),
-    OpenAsset(String, Asset),
+    OpenAsset(AssetHandle),
     SetPayload(Option<crate::Draggable>),
     FilterChanged(String),
     ViewChanged(ViewMode),
