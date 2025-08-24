@@ -4,7 +4,7 @@ mod notification;
 mod style;
 mod widgets;
 
-use crate::assets::{Asset, Image};
+use crate::assets::{Asset, AssetHandle, Image};
 use crate::notification::Notification;
 use crate::widgets::dialog::{Dialog, DialogOption};
 use crate::widgets::dnd::{dnd_indicator, dnd_receiver};
@@ -13,6 +13,7 @@ use graph::line_styles::AxisAligned;
 use graph::{GraphEvent, GraphNode, RelativeAttachment, line_styles};
 use iced::Length::Shrink;
 use iced::keyboard::key::Named;
+use ron::ser::PrettyConfig;
 use widgets::*;
 
 use iced::keyboard::{Key, Modifiers};
@@ -52,9 +53,8 @@ fn main() -> iced::Result {
         .run_with(|| {
             (
                 State {
-                    graph_position: Vector::ZERO,
-                    graph_zoom: 1.0,
                     nodes: GraphData::default(),
+                    assets: AssetsData::default(),
                     panes: pane_grid::State::with_configuration(Configuration::Split {
                         axis: pane_grid::Axis::Vertical,
                         ratio: 0.25,
@@ -62,7 +62,8 @@ fn main() -> iced::Result {
                         b: Box::new(Configuration::Pane(Pane::Graph)),
                     }),
                     focus: None,
-                    assets: AssetsData::default(),
+                    graph_position: Vector::ZERO,
+                    graph_zoom: 1.0,
                     notifications: Vec::new(),
                     dnd_payload: None,
                     dialog: None,
@@ -74,25 +75,31 @@ fn main() -> iced::Result {
 
 #[derive(Clone, Debug)]
 enum Draggable {
-    Asset(assets::Asset),
+    Asset(AssetHandle),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct Character {
+    name: String,
+    img: AssetHandle,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum Node {
-    Character(assets::Image),
+    Character(Character),
     Family,
 }
 
 struct State {
-    graph_position: Vector,
     nodes: GraphData<Node, RelativeAttachment<line_styles::AxisAligned>>,
-    panes: pane_grid::State<Pane>,
     assets: assets::AssetsData,
+    panes: pane_grid::State<Pane>,
     focus: Option<pane_grid::Pane>,
+    graph_position: Vector,
+    graph_zoom: f32,
     notifications: Vec<Notification>,
     dnd_payload: Option<Draggable>,
     dialog: Option<Dialog<Message>>,
-    graph_zoom: f32,
 }
 
 #[derive(Default, PartialEq)]
@@ -105,32 +112,33 @@ enum Pane {
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone)]
 enum Message {
-    AddExternalImage(PathBuf, Point),
-    AddImage(Image, Point),
+    AssetsMessage(AssetsMessage),
+    AddCharacter(Character, Point),
     MenuButtonPressed,
-    OpenAddImageDialog,
     OpenLoadFolderDialog,
+    ConfirmLoadPath(PathBuf),
+    DataNotLoaded,
+    LoadData(PathBuf),
+    ParseData(String, PathBuf),
+    LoadDataFailed(IOError),
+    OpenFolderFailed(IOError),
+    OpenAddAssetDialog,
+    AddExternalAsset(PathBuf),
+    AddAsset(String, Asset),
+    AddAssetFailed(IOError),
     Save,
+    Saved,
+    SaveFailed(std::io::ErrorKind),
     PaneClicked(pane_grid::Pane),
     PaneDragged(pane_grid::DragEvent),
     PaneResized(pane_grid::ResizeEvent),
-    AssetsMessage(AssetsMessage),
     GraphEvent(GraphEvent<RelativeAttachment<line_styles::AxisAligned>>),
-    ImageButtonPressed,
-    Saved,
-    SaveFailed(std::io::ErrorKind),
-    ParseData(String, PathBuf),
-    ConfirmLoadPath(PathBuf),
-    LoadData(PathBuf),
-    LoadDataFailed(IOError),
-    OpenFolderFailed(IOError),
-    AddImageFailed(IOError),
-    DismissNotification(usize),
-    DataNotLoaded,
-    Tick,
     TraverseGraph,
+    CharacterButtonPressed,
+    DismissNotification(usize),
+    Tick,
     SetDragPayload(Option<Draggable>),
-    DropImageOnGraph(assets::Image, Point),
+    DropAssetOnGraph(AssetHandle, Point),
     CloseDialog,
 }
 
@@ -141,7 +149,7 @@ fn view(state: &State) -> Element<'_, Message> {
             menu_button("File", Message::MenuButtonPressed),
             menu!(
                 (menu_item_button("Open Folder", Some("CTRL+O")).on_press(Message::OpenLoadFolderDialog))
-                (menu_item_button("Add Image", None).on_press(Message::OpenAddImageDialog))
+                (menu_item_button("Add Image", None).on_press(Message::OpenAddAssetDialog))
                 (menu_item_button("Save", Some("CTRL+S")).on_press(Message::Save))
             )
             .width(200.0)
@@ -183,7 +191,7 @@ fn view(state: &State) -> Element<'_, Message> {
 
         let mut content = pane_grid::Content::new(match pane {
             Pane::Graph => {
-                let graph = graph(&state.nodes, view_node)
+                let graph = graph(&state.nodes, view_node(&state.assets))
                     .position(state.graph_position)
                     .zoom(state.graph_zoom)
                     .on_event(Message::GraphEvent)
@@ -242,9 +250,9 @@ fn view(state: &State) -> Element<'_, Message> {
 
                 Element::from(dnd_receiver(
                     |payload, relative_cursor_pos| match payload {
-                        Draggable::Asset(asset) => match asset {
-                            Asset::Image(img) => {
-                                Some(Message::DropImageOnGraph(img, relative_cursor_pos))
+                        Draggable::Asset(handle) => match state.assets[handle] {
+                            Asset::Image(_) => {
+                                Some(Message::DropAssetOnGraph(handle, relative_cursor_pos))
                             }
                         },
                     },
@@ -312,9 +320,9 @@ fn view(state: &State) -> Element<'_, Message> {
             stack![
                 dnd_indicator(
                     state.dnd_payload.clone().map(|draggable| match draggable {
-                        Draggable::Asset(asset) => match asset {
+                        Draggable::Asset(handle) => match &state.assets[handle] {
                             Asset::Image(img) =>
-                                container(image(img.handle).width(50.0).opacity(0.5))
+                                container(image(img.handle.clone()).width(50.0).opacity(0.5))
                                     .width(50.0)
                                     .into(),
                         },
@@ -329,59 +337,21 @@ fn view(state: &State) -> Element<'_, Message> {
 
 fn update(state: &mut State, message: Message) -> Task<Message> {
     match message {
-        Message::AddExternalImage(path, pos) => {
-            Task::perform(io::load_file(path), move |asset_maybe| match asset_maybe {
-                Ok(asset) => match asset {
-                    Asset::Image(img) => Message::AddImage(img, pos),
-                },
-                Err(err) => Message::AddImageFailed(err),
-            })
-        }
-        Message::AddImage(img, pos) => {
-            state.nodes.add(Node::Character(img), pos);
-            Task::none()
-        }
-        Message::AddImageFailed(err) => {
-            state.notifications.push(Notification::error(
-                "Failed to add image",
-                format!("Failed to add image: {err:?}",),
-            ));
-
-            Task::none()
-        }
-        Message::PaneClicked(pane) => {
-            state.focus = Some(pane);
-            Task::none()
-        }
-        Message::PaneResized(pane_grid::ResizeEvent { split, ratio }) => {
-            state.panes.resize(split, ratio);
-            Task::none()
-        }
-        Message::PaneDragged(pane_grid::DragEvent::Dropped { pane, target }) => {
-            state.panes.drop(pane, target);
-            Task::none()
-        }
-        Message::PaneDragged(_) => Task::none(),
-        Message::OpenAddImageDialog => Task::perform(pick_file(), |path_maybe| match path_maybe {
-            Ok(path) => Message::AddExternalImage(path, Point::ORIGIN),
-            Err(err) => Message::AddImageFailed(err),
-        }),
-        Message::OpenLoadFolderDialog => {
-            Task::perform(pick_folder(), |path_maybe| match path_maybe {
-                Ok(path) if path.exists() && path.is_dir() => Message::ConfirmLoadPath(path),
-                Ok(path) if path.is_file() => {
-                    Message::OpenFolderFailed(IOError::IO(std::io::ErrorKind::NotADirectory))
-                }
-                Ok(_) => Message::OpenFolderFailed(IOError::IO(std::io::ErrorKind::NotFound)),
-                Err(err) => Message::OpenFolderFailed(err),
-            })
-        }
         Message::AssetsMessage(assets_message) => match assets_message {
-            AssetsMessage::OpenAsset(_, asset) => match asset {
-                Asset::Image(img) => {
-                    Task::done(Message::AddImage(img, Point::ORIGIN + state.graph_position))
+            AssetsMessage::OpenAsset(handle) => {
+                let Some(asset) = state.assets.get(handle) else {
+                    return Task::none();
+                };
+                match asset {
+                    Asset::Image(img) => Task::done(Message::AddCharacter(
+                        Character {
+                            name: img.file_name.split('.').next().unwrap().to_string(),
+                            img: handle,
+                        },
+                        Point::ORIGIN + state.graph_position,
+                    )),
                 }
-            },
+            }
             AssetsMessage::LoadAssets(path) => {
                 state.assets.set_folder(path.clone());
                 assets::update(&mut state.assets, AssetsMessage::LoadAssets(path.clone()))
@@ -398,12 +368,27 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             AssetsMessage::SetPayload(payload) => Task::done(Message::SetDragPayload(payload)),
             _ => assets::update(&mut state.assets, assets_message).map(Message::AssetsMessage),
         },
+        Message::AddCharacter(chara, pos) => {
+            state.nodes.add(Node::Character(chara), pos);
+            Task::none()
+        }
+        Message::MenuButtonPressed => Task::none(),
+        Message::OpenLoadFolderDialog => {
+            Task::perform(pick_folder(), |path_maybe| match path_maybe {
+                Ok(path) if path.exists() && path.is_dir() => Message::ConfirmLoadPath(path),
+                Ok(path) if path.is_file() => {
+                    Message::OpenFolderFailed(IOError::IO(std::io::ErrorKind::NotADirectory))
+                }
+                Ok(_) => Message::OpenFolderFailed(IOError::IO(std::io::ErrorKind::NotFound)),
+                Err(err) => Message::OpenFolderFailed(err),
+            })
+        }
         Message::ConfirmLoadPath(path) => {
             let read_dir: Vec<_> = path.as_path().read_dir().unwrap().collect();
 
             if read_dir.iter().any(|path| {
                 path.as_ref()
-                    .is_ok_and(|entry| entry.file_name() == "data.toml")
+                    .is_ok_and(|entry| entry.file_name() == "data.ron")
             }) {
                 return Task::done(Message::LoadData(path));
             } else if read_dir.len()
@@ -433,36 +418,17 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
 
             Task::none()
         }
+        Message::DataNotLoaded => Task::none(),
         Message::LoadData(path) => {
             state.dialog = None;
 
             Task::done(Message::AssetsMessage(AssetsMessage::LoadAssets(path)))
         }
-        Message::LoadDataFailed(err) => {
-            let message = match err {
-                IOError::DeserializationFailed(ref error) => {
-                    format!("error at {:?}: {}", error.span(), error.message())
-                }
-                IOError::DialogClosed => return Task::none(),
-                IOError::IO(error_kind) => {
-                    format!("IO error occurred: {error_kind:#?}")
-                }
-                IOError::InvalidAsset => "File is not a valid Asset.".to_string(),
-            };
-
-            state.notifications.push(Notification::error(
-                "Failed to load data",
-                format!("Failed to load data: {message}",),
-            ));
-
-            Task::none()
-        }
-        Message::DataNotLoaded => Task::none(),
         Message::ParseData(raw_data, path) => {
             let data: Result<
                 GraphData<Node, RelativeAttachment<line_styles::AxisAligned>>,
                 IOError,
-            > = toml::from_str(&raw_data).map_err(IOError::from);
+            > = ron::from_str(&raw_data).map_err(IOError::from);
 
             match data {
                 Ok(data) => {
@@ -475,28 +441,33 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
 
                     state.assets.set_folder(path.clone());
 
-                    state
-                        .nodes
-                        .iter_mut()
-                        .filter_map(|node| match node.data_mut() {
-                            Node::Character(img) => Some(img),
-                            _ => None,
-                        })
-                        .for_each(|img| {
-                            let key = "images/".to_owned() + &img.file_name.clone();
-
-                            #[allow(irrefutable_let_patterns)]
-                            if let Some(asset) = state.assets.assets().get(&key)
-                                && let Asset::Image(asset_img) = asset
-                            {
-                                img.handle = asset_img.handle.clone();
-                            }
-                        });
-
                     Task::none()
                 }
                 Err(err) => Task::done(Message::LoadDataFailed(err)),
             }
+        }
+        Message::LoadDataFailed(err) => {
+            let message = match err {
+                IOError::DeserializationFailed(ref error) => {
+                    format!("error at {:?}: {}", error.position, error.code)
+                }
+                IOError::DialogClosed => return Task::none(),
+                IOError::IO(error_kind) => {
+                    format!("IO error occurred: {error_kind:#?}")
+                }
+                IOError::InvalidAsset => "File is not a valid Asset.".to_string(),
+                IOError::OSError(err) => format!("OS Error ({err})"),
+                IOError::NoFolderLoaded => {
+                    "Can't complete operation without any folder being loaded".to_string()
+                }
+            };
+
+            state.notifications.push(Notification::error(
+                "Failed to load data",
+                format!("Failed to load data: {message}",),
+            ));
+
+            Task::none()
         }
         Message::OpenFolderFailed(err) => {
             if let IOError::DialogClosed = err {
@@ -508,6 +479,81 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 format!("Failed to open folder: {err:?}",),
             ));
 
+            Task::none()
+        }
+        Message::OpenAddAssetDialog => Task::perform(pick_file(), |path_maybe| match path_maybe {
+            Ok(path) => Message::AddExternalAsset(path),
+            Err(err) => Message::AddAssetFailed(err),
+        }),
+        Message::AddExternalAsset(path) => {
+            let closure = move |res: Result<(PathBuf, Asset), IOError>| match res {
+                Ok((path, asset)) => Message::AddAsset(
+                    path.file_name().unwrap().to_string_lossy().to_string(),
+                    asset,
+                ),
+                Err(err) => Message::AddAssetFailed(err),
+            };
+
+            Task::perform(
+                io::copy_to_assets_dir(state.assets.folder().cloned(), path.clone()),
+                closure,
+            )
+        }
+        Message::AddAsset(file_name, asset) => match state.assets.add(file_name, asset) {
+            Ok(_) => Task::none(),
+            Err(err) => Task::done(Message::AddAssetFailed(err)),
+        },
+        Message::AddAssetFailed(err) => {
+            state.notifications.push(Notification::error(
+                "Failed to add asset",
+                format!("Failed to add asset: {err:?}",),
+            ));
+
+            Task::none()
+        }
+        Message::Save => {
+            let parsed = ron::ser::to_string_pretty(&state.nodes, PrettyConfig::new()).unwrap();
+
+            if let Some(folder) = &state.assets.folder() {
+                Task::perform(io::save(folder.join("data.ron"), parsed), |res| match res {
+                    Ok(()) => Message::Saved,
+                    Err(err) => Message::SaveFailed(err.kind()),
+                })
+            } else {
+                Task::none()
+            }
+        }
+        Message::Saved => {
+            state.notifications.push(Notification::info(
+                "Saved successfully!",
+                format!(
+                    "successfully saved to {}",
+                    state.assets.folder().unwrap().to_string_lossy()
+                ),
+            ));
+            Task::none()
+        }
+        Message::SaveFailed(err) => {
+            state.notifications.push(Notification::error(
+                "Failed to save data",
+                format!(
+                    "Failed to save to {}: {err}",
+                    state.assets.folder().unwrap().to_string_lossy()
+                ),
+            ));
+            Task::none()
+        }
+        Message::PaneClicked(pane) => {
+            state.focus = Some(pane);
+            Task::none()
+        }
+        Message::PaneDragged(pane_grid::DragEvent::Dropped { pane, target }) => {
+            state.panes.drop(pane, target);
+            Task::none()
+        }
+        Message::PaneDragged(_) => Task::none(),
+        Message::PaneResized(pane_grid::ResizeEvent { split, ratio }) => {
+            state.panes.resize(split, ratio);
             Task::none()
         }
         Message::GraphEvent(ev) => match ev {
@@ -633,44 +679,15 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 Task::none()
             }
         },
-        Message::ImageButtonPressed => {
+        Message::TraverseGraph => {
+            state
+                .nodes
+                .iter_bfs(state.nodes.selection().next().unwrap_or(0))
+                .for_each(|(i, node)| println!("for_each {i}: {:?}", node.data()));
+            Task::none()
+        }
+        Message::CharacterButtonPressed => {
             println!("pressd");
-            Task::none()
-        }
-        Message::MenuButtonPressed => Task::none(),
-        Message::Save => {
-            let parsed = toml::to_string(&state.nodes).unwrap();
-
-            if let Some(folder) = &state.assets.folder() {
-                Task::perform(
-                    io::save(folder.join("data.toml"), parsed),
-                    |res| match res {
-                        Ok(()) => Message::Saved,
-                        Err(err) => Message::SaveFailed(err.kind()),
-                    },
-                )
-            } else {
-                Task::none()
-            }
-        }
-        Message::Saved => {
-            state.notifications.push(Notification::info(
-                "Saved successfully!",
-                format!(
-                    "successfully saved to {}",
-                    state.assets.folder().unwrap().to_string_lossy()
-                ),
-            ));
-            Task::none()
-        }
-        Message::SaveFailed(err) => {
-            state.notifications.push(Notification::error(
-                "Failed to save data",
-                format!(
-                    "Failed to save to {}: {err}",
-                    state.assets.folder().unwrap().to_string_lossy()
-                ),
-            ));
             Task::none()
         }
         Message::DismissNotification(i) => {
@@ -689,26 +706,29 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
 
             Task::none()
         }
-        Message::TraverseGraph => {
-            state
-                .nodes
-                .iter_bfs(state.nodes.selection().next().unwrap_or(0))
-                .for_each(|(i, node)| println!("for_each {i}: {:?}", node.data()));
-            Task::none()
-        }
         Message::SetDragPayload(draggable) => {
             if !(state.dnd_payload.is_some() && draggable.is_some()) {
                 state.dnd_payload = draggable;
             }
             Task::none()
         }
-        Message::DropImageOnGraph(path, relative_cursor_pos) => {
+        Message::DropAssetOnGraph(handle, relative_cursor_pos) => {
             state.dnd_payload = None;
-            Task::done(Message::AddImage(
-                path,
-                relative_cursor_pos * Transformation::scale(1.0 / state.graph_zoom)
-                    + state.graph_position,
-            ))
+            match &state.assets[handle] {
+                Asset::Image(image) => Task::done(Message::AddCharacter(
+                    Character {
+                        name: image
+                            .file_name
+                            .split('.')
+                            .next()
+                            .unwrap_or("name")
+                            .to_string(),
+                        img: handle,
+                    },
+                    relative_cursor_pos * Transformation::scale(1.0 / state.graph_zoom)
+                        + state.graph_position,
+                )),
+            }
         }
         Message::CloseDialog => {
             state.dialog = None;
@@ -735,18 +755,21 @@ fn subscription(_state: &State) -> Subscription<Message> {
     ])
 }
 
-fn view_node(node: &GraphNode<Node>) -> Element<'_, Message> {
-    match node.data() {
-        Node::Character(img) => container(
+#[allow(clippy::type_complexity)]
+fn view_node<'a>(
+    assets: &'a AssetsData,
+) -> Box<dyn for<'any> Fn(&'any GraphNode<Node>) -> Element<'any, Message> + 'a> {
+    Box::new(|node| match node.data() {
+        Node::Character(chara) => container(
             column![
-                image(img.handle.clone())
+                image(Image::try_from(&assets[chara.img]).unwrap().handle)
                     .width(Fill)
                     .height(Fill)
                     .filter_method(image::FilterMethod::Nearest),
                 opaque(
                     column![
-                        text(&img.name).center().width(Fill),
-                        base_button("ahkdlfjs").on_press(Message::ImageButtonPressed)
+                        text(&chara.name).center().width(Fill),
+                        base_button("ahkdlfjs").on_press(Message::CharacterButtonPressed)
                     ]
                     .width(Fill)
                     .spacing(5.0)
@@ -769,7 +792,7 @@ fn view_node(node: &GraphNode<Node>) -> Element<'_, Message> {
                 ..Default::default()
             })
             .into(),
-    }
+    })
 }
 
 #[allow(clippy::type_complexity)]
