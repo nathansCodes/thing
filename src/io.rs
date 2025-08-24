@@ -1,13 +1,29 @@
 use std::{
     collections::HashMap,
-    io::{BufReader, Read, Write},
-    path::PathBuf,
+    fs::File,
+    io::{BufReader, ErrorKind, Read, Write},
+    os::unix::fs::FileExt,
+    path::{Path, PathBuf},
 };
 
 use file_type::FileType;
 use iced::{futures::io, widget::image};
+use ron::ser::PrettyConfig;
+use serde::{Deserialize, Serialize};
 
 use crate::assets::{self, Asset};
+
+#[derive(Serialize, Deserialize, Debug, Default)]
+struct Metadata {
+    ids: HashMap<u32, String>,
+}
+
+impl Metadata {
+    fn new_key(&self) -> u32 {
+        let keys: Vec<&u32> = self.ids.keys().collect();
+        (0..).into_iter().find(|id| !keys.contains(&id)).unwrap()
+    }
+}
 
 pub async fn pick_file() -> Result<PathBuf, IOError> {
     let file_handle = rfd::AsyncFileDialog::new()
@@ -31,7 +47,7 @@ pub async fn pick_folder() -> Result<PathBuf, IOError> {
 }
 
 pub async fn save(path: PathBuf, data: String) -> Result<(), std::io::Error> {
-    let mut file = std::fs::File::create(path)?;
+    let mut file = File::create(path)?;
 
     file.write_all(data.as_bytes())?;
 
@@ -39,7 +55,7 @@ pub async fn save(path: PathBuf, data: String) -> Result<(), std::io::Error> {
 }
 
 pub async fn load(path: PathBuf) -> Result<String, IOError> {
-    let mut file = std::fs::File::open(path.join("data.toml"))?;
+    let mut file = File::open(path.join("data.ron"))?;
 
     let mut data = String::new();
 
@@ -48,58 +64,122 @@ pub async fn load(path: PathBuf) -> Result<String, IOError> {
     Ok(data)
 }
 
-pub async fn load_dir(path: PathBuf) -> Result<HashMap<String, Asset>, IOError> {
-    let dir = std::fs::read_dir(path).map_err(|err| IOError::IO(err.kind()))?;
+pub async fn load_dir(path: PathBuf) -> Result<HashMap<u32, (String, Asset)>, IOError> {
+    let metadata_path = path.join(".meta.ron");
 
-    let assets: HashMap<String, Asset> = dir
+    let mut metadata_file = match File::options()
+        .read(true)
+        .write(true)
+        .open(metadata_path.clone())
+    {
+        Ok(metadata_file) => metadata_file,
+        Err(err) => match err.kind() {
+            ErrorKind::NotFound => File::create_new(metadata_path)?,
+            _ => return Err(IOError::from(err)),
+        },
+    };
+
+    let mut metadata_contents = String::new();
+
+    metadata_file.read_to_string(&mut metadata_contents)?;
+
+    let mut metadata: Metadata = if metadata_contents.trim().is_empty() {
+        Metadata::default()
+    } else {
+        ron::de::from_str(&metadata_contents)?
+    };
+
+    let dir: Vec<_> = std::fs::read_dir(path.clone())?
         .filter_map(|entry| {
-            entry.ok().and_then(|entry| {
-                let path = entry.path();
+            entry
+                .ok()
+                .and_then(|entry| (!entry.file_name().eq(".meta.ron")).then_some(entry))
+        })
+        .collect();
 
-                let mut file = std::fs::File::open(path.clone()).ok()?;
+    if metadata.ids.len() < dir.len() {
+        for entry in dir {
+            let folder_name = path
+                .file_name()
+                .map(|file_name| file_name.to_string_lossy().to_string())
+                .unwrap_or("".to_string());
+            let file_name = entry.file_name().to_string_lossy().to_string();
 
-                let mut buffer = Vec::new();
+            let mut asset_path = folder_name + "/";
+            asset_path.push_str(&file_name);
 
-                file.read_to_end(&mut buffer).ok()?;
+            if !metadata
+                .ids
+                .values()
+                .collect::<Vec<_>>()
+                .contains(&&asset_path)
+            {
+                let id = metadata.new_key();
+                metadata.ids.insert(id, asset_path);
+            }
+        }
 
-                let reader = BufReader::new(buffer.as_slice());
+        if let Ok(metadata_str) = ron::ser::to_string_pretty(&metadata, PrettyConfig::new()) {
+            match metadata_file.write_all_at(metadata_str.as_bytes(), 0) {
+                Ok(_) => (),
+                Err(err) => {
+                    eprintln!("{err}");
+                }
+            }
+        }
+    }
 
-                let file_type = FileType::try_from_reader(reader).expect("File type not found!");
+    let assets: HashMap<u32, (String, Asset)> = metadata
+        .ids
+        .into_iter()
+        .filter_map(|(id, entry)| {
+            let path = path.join(entry.split('/').next_back().unwrap());
 
-                let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+            let mut file = File::open(path.clone()).ok()?;
 
-                let mut key = path
-                    .parent()
-                    .and_then(|path| {
-                        path.file_name()
-                            .map(|file_name| file_name.to_string_lossy().to_string())
-                    })
-                    .unwrap_or("".to_string())
-                    + "/";
+            let mut buffer = Vec::new();
 
-                key.push_str(&file_name);
+            file.read_to_end(&mut buffer).ok()?;
 
-                file_type
-                    .media_types()
-                    .iter()
-                    .any(|t| t.contains("image"))
-                    .then_some((
-                        key,
+            let reader = BufReader::new(buffer.as_slice());
+
+            let file_type = FileType::try_from_reader(reader).expect("File type not found!");
+
+            let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+
+            let mut asset_path = path
+                .parent()
+                .and_then(|path| {
+                    path.file_name()
+                        .map(|file_name| file_name.to_string_lossy().to_string())
+                })
+                .unwrap_or("".to_string())
+                + "/";
+
+            asset_path.push_str(&file_name);
+
+            file_type
+                .media_types()
+                .iter()
+                .any(|t| t.contains("image"))
+                .then_some((
+                    id,
+                    (
+                        asset_path,
                         Asset::Image(assets::Image {
-                            name: path.file_stem().unwrap().to_string_lossy().to_string(),
                             file_name,
                             handle: image::Handle::from_bytes(buffer),
                         }),
-                    ))
-            })
+                    ),
+                ))
         })
         .collect();
 
     Ok(assets)
 }
 
-pub async fn load_file(path: PathBuf) -> Result<Asset, IOError> {
-    let mut file = std::fs::File::open(path.clone())?;
+pub async fn load_file(path: &Path) -> Result<Asset, IOError> {
+    let mut file = File::open(path)?;
 
     let mut buffer = Vec::new();
 
@@ -111,9 +191,12 @@ pub async fn load_file(path: PathBuf) -> Result<Asset, IOError> {
 
     let file_name = path.file_name().unwrap().to_string_lossy().to_string();
 
-    if file_type.media_types().contains(&"image") {
+    if file_type
+        .media_types()
+        .iter()
+        .any(|media| media.starts_with("image"))
+    {
         Ok(Asset::Image(assets::Image {
-            name: path.file_stem().unwrap().to_string_lossy().to_string(),
             file_name,
             handle: image::Handle::from_bytes(buffer),
         }))
@@ -122,22 +205,54 @@ pub async fn load_file(path: PathBuf) -> Result<Asset, IOError> {
     }
 }
 
+pub async fn copy_to_assets_dir(
+    assets_folder: Option<PathBuf>,
+    path: PathBuf,
+) -> Result<(PathBuf, Asset), IOError> {
+    let Some(folder) = assets_folder.clone() else {
+        return Err(IOError::NoFolderLoaded);
+    };
+
+    match load_file(&path).await {
+        Ok(asset) => {
+            let file_name = path
+                .clone()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
+
+            let new_path = folder.join(asset.folder()).join(file_name);
+
+            std::fs::copy(path.clone(), new_path)?;
+
+            Ok((path, asset))
+        }
+        Err(err) => Err(err),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum IOError {
     DialogClosed,
     IO(io::ErrorKind),
-    DeserializationFailed(toml::de::Error),
+    OSError(i32),
+    DeserializationFailed(ron::de::SpannedError),
     InvalidAsset,
+    NoFolderLoaded,
 }
 
 impl From<std::io::Error> for IOError {
     fn from(value: std::io::Error) -> Self {
-        Self::IO(value.kind())
+        match value.raw_os_error() {
+            Some(err) => Self::OSError(err),
+            None => Self::IO(value.kind()),
+        }
     }
 }
 
-impl From<toml::de::Error> for IOError {
-    fn from(value: toml::de::Error) -> Self {
+impl From<ron::de::SpannedError> for IOError {
+    fn from(value: ron::de::SpannedError) -> Self {
         Self::DeserializationFailed(value)
     }
 }
