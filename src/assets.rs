@@ -1,10 +1,14 @@
+pub mod image;
+
+pub use image::Image;
+
 use std::{collections::HashMap, io, ops::Index, path::PathBuf};
 
 use iced::{
     Alignment, Element,
     Length::Fill,
     Task,
-    widget::{button, column, image, row, scrollable, text, text_input},
+    widget::{self, button, column, row, scrollable, text, text_input},
 };
 use serde::{Deserialize, Serialize};
 
@@ -13,36 +17,6 @@ use crate::{
     style,
     widgets::{dnd::dnd_provider, dropdown, icons},
 };
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Image {
-    pub file_name: String,
-    #[serde(skip)]
-    #[serde(default = "default_image")]
-    pub handle: image::Handle,
-}
-
-impl TryFrom<&Asset> for Image {
-    type Error = ();
-
-    #[allow(unreachable_patterns)]
-    fn try_from(asset: &Asset) -> Result<Self, Self::Error> {
-        match asset {
-            Asset::Image(image) => Ok(image.clone()),
-            _ => Err(()),
-        }
-    }
-}
-
-impl From<Image> for Asset {
-    fn from(image: Image) -> Self {
-        Asset::Image(image)
-    }
-}
-
-fn default_image() -> image::Handle {
-    image::Handle::from_bytes(include_bytes!("../assets/default.png").as_slice())
-}
 
 #[derive(Default, Debug, Clone, Copy)]
 pub enum ViewMode {
@@ -227,10 +201,10 @@ fn image_item<'a>(
         match view {
             ViewMode::Thumbnails => button(
                 column![
-                    image(&img.handle)
+                    widget::image(&img.handle)
                         .height(100.0)
                         .width(100.0)
-                        .filter_method(image::FilterMethod::Nearest),
+                        .filter_method(widget::image::FilterMethod::Nearest),
                     text(img.file_name.clone()).width(100.0).center()
                 ]
                 .spacing(5.0)
@@ -241,10 +215,10 @@ fn image_item<'a>(
             .on_press(AssetsMessage::OpenAsset(handle)),
             ViewMode::List => button(
                 row![
-                    image(&img.handle)
+                    widget::image(&img.handle)
                         .height(30)
                         .width(30)
-                        .filter_method(image::FilterMethod::Nearest),
+                        .filter_method(widget::image::FilterMethod::Nearest),
                     text(img.file_name.clone())
                 ]
                 .width(Fill)
