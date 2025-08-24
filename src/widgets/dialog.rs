@@ -11,6 +11,7 @@ use iced::{
 
 use crate::style;
 
+#[allow(unused)]
 #[derive(Debug, Clone, Copy)]
 pub enum Severity {
     Success,

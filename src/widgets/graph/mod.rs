@@ -1,6 +1,7 @@
 pub mod connections;
 mod data;
 mod iter;
+#[allow(unused)]
 pub mod line_styles;
 mod state;
 
