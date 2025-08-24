@@ -18,19 +18,6 @@ use crate::{
     widgets::{dnd::dnd_provider, dropdown, icons},
 };
 
-#[derive(Default, Debug, Clone, Copy)]
-pub enum ViewMode {
-    #[default]
-    Thumbnails,
-    List,
-}
-
-#[derive(Default, Debug, Clone, Copy)]
-pub enum AssetKind {
-    #[default]
-    Image,
-}
-
 #[derive(Debug, Clone)]
 pub enum Asset {
     Image(Image),
@@ -52,6 +39,19 @@ impl Asset {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct AssetHandle(u32);
+
+#[derive(Default, Debug, Clone, Copy)]
+pub enum AssetKind {
+    #[default]
+    Image,
+}
+
+#[derive(Default, Debug, Clone, Copy)]
+pub enum ViewMode {
+    #[default]
+    Thumbnails,
+    List,
+}
 
 #[derive(Default)]
 pub struct AssetsData {
