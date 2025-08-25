@@ -1,4 +1,3 @@
-#[allow(unused)]
 mod assets;
 mod io;
 mod notification;
