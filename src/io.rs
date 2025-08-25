@@ -11,11 +11,11 @@ use iced::{futures::io, widget::image};
 use ron::ser::PrettyConfig;
 use serde::{Deserialize, Serialize};
 
-use crate::assets::{self, Asset};
+use crate::assets::{self, Asset, AssetPath};
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 struct Metadata {
-    ids: HashMap<u32, String>,
+    ids: HashMap<u32, AssetPath>,
 }
 
 impl Metadata {
@@ -64,7 +64,7 @@ pub async fn load(path: PathBuf) -> Result<String, IOError> {
     Ok(data)
 }
 
-pub async fn load_dir(path: PathBuf) -> Result<HashMap<u32, (String, Asset)>, IOError> {
+pub async fn load_dir(path: PathBuf) -> Result<HashMap<u32, (AssetPath, Asset)>, IOError> {
     let metadata_path = path.join(".meta.ron");
 
     let mut metadata_file = match File::options()
@@ -111,8 +111,8 @@ pub async fn load_dir(path: PathBuf) -> Result<HashMap<u32, (String, Asset)>, IO
             if !metadata
                 .ids
                 .values()
-                .collect::<Vec<_>>()
-                .contains(&&asset_path)
+                .any(|path| path.to_string().eq(&asset_path))
+                && let Ok(asset_path) = AssetPath::try_from(asset_path.as_str())
             {
                 let id = metadata.new_key();
                 metadata.ids.insert(id, asset_path);
@@ -129,11 +129,11 @@ pub async fn load_dir(path: PathBuf) -> Result<HashMap<u32, (String, Asset)>, IO
         }
     }
 
-    let assets: HashMap<u32, (String, Asset)> = metadata
+    let assets = metadata
         .ids
         .into_iter()
         .filter_map(|(id, entry)| {
-            let path = path.join(entry.split('/').next_back().unwrap());
+            let path = path.join(entry.name());
 
             let mut file = File::open(path.clone()).ok()?;
 
@@ -145,33 +145,24 @@ pub async fn load_dir(path: PathBuf) -> Result<HashMap<u32, (String, Asset)>, IO
 
             let file_type = FileType::try_from_reader(reader).expect("File type not found!");
 
+            let media_types = file_type.media_types();
+
             let file_name = path.file_name().unwrap().to_string_lossy().to_string();
 
-            let mut asset_path = path
-                .parent()
-                .and_then(|path| {
-                    path.file_name()
-                        .map(|file_name| file_name.to_string_lossy().to_string())
-                })
-                .unwrap_or("".to_string())
-                + "/";
-
-            asset_path.push_str(&file_name);
-
-            file_type
-                .media_types()
-                .iter()
-                .any(|t| t.contains("image"))
-                .then_some((
+            if media_types.iter().any(|t| t.contains("image")) {
+                Some((
                     id,
                     (
-                        asset_path,
+                        AssetPath::new(assets::AssetKind::Image, file_name.clone()),
                         Asset::Image(assets::Image {
                             file_name,
                             handle: image::Handle::from_bytes(buffer),
                         }),
                     ),
                 ))
+            } else {
+                None
+            }
         })
         .collect();
 
