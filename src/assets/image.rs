@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::assets::Asset;
 
+const DEFAULT_IMAGE: &[u8] = include_bytes!("../../assets/default.png").as_slice();
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Image {
     pub file_name: String,
@@ -29,6 +31,6 @@ impl From<Image> for Asset {
     }
 }
 
-fn default_image() -> image::Handle {
-    image::Handle::from_bytes(include_bytes!("../../assets/default.png").as_slice())
+pub fn default_image() -> image::Handle {
+    image::Handle::from_bytes(DEFAULT_IMAGE)
 }
