@@ -4,6 +4,7 @@ mod notification;
 mod style;
 mod widgets;
 
+use crate::assets::image::default_image;
 use crate::assets::{Asset, AssetHandle, AssetKind, Image};
 use crate::notification::Notification;
 use crate::widgets::dialog::{Dialog, DialogOption};
@@ -752,10 +753,16 @@ fn view_node<'a>(
     Box::new(|node| match node.data() {
         Node::Character(chara) => container(
             column![
-                image(Image::try_from(&assets[chara.img]).unwrap().handle)
-                    .width(Fill)
-                    .height(Fill)
-                    .filter_method(image::FilterMethod::Nearest),
+                image(
+                    assets
+                        .get(chara.img)
+                        .and_then(|asset| Image::try_from(asset).ok())
+                        .map(|img| img.handle)
+                        .unwrap_or(default_image())
+                )
+                .width(Fill)
+                .height(Fill)
+                .filter_method(image::FilterMethod::Nearest),
                 opaque(
                     column![
                         text(&chara.name).center().width(Fill),

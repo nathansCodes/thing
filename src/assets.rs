@@ -1,5 +1,5 @@
 mod asset_path;
-mod image;
+pub mod image;
 mod ui;
 
 pub use asset_path::AssetPath;
