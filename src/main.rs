@@ -368,6 +368,17 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     ))
             }
             AssetsMessage::SetPayload(payload) => Task::done(Message::SetDragPayload(payload)),
+            AssetsMessage::RenameAssetFailed(err, asset) => {
+                state.notifications.push(Notification::error(
+                    "Failed to rename asset",
+                    format!(
+                        "Failed to rename asset:\n  {:?};\ndue to error: {err}",
+                        &state.assets[asset]
+                    ),
+                ));
+
+                Task::none()
+            }
             _ => assets::update(&mut state.assets, assets_message).map(Message::AssetsMessage),
         },
         Message::AddCharacter(chara, pos) => {
