@@ -447,24 +447,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         }
         Message::LoadDataFailed(err) => {
-            let message = match err {
-                IOError::DeserializationFailed(ref error) => {
-                    format!("error at {:?}: {}", error.position, error.code)
-                }
-                IOError::DialogClosed => return Task::none(),
-                IOError::IO(error_kind) => {
-                    format!("IO error occurred: {error_kind:#?}")
-                }
-                IOError::InvalidAsset => "File is not a valid Asset.".to_string(),
-                IOError::OSError(err) => format!("OS Error ({err})"),
-                IOError::NoFolderLoaded => {
-                    "Can't complete operation without any folder being loaded".to_string()
-                }
-            };
-
             state.notifications.push(Notification::error(
                 "Failed to load data",
-                format!("Failed to load data: {message}",),
+                format!("Failed to load data: {err}",),
             ));
 
             Task::none()

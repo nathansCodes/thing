@@ -10,6 +10,7 @@ use file_type::FileType;
 use iced::{futures::io, widget::image};
 use ron::ser::PrettyConfig;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::assets::{self, Asset, AssetPath};
 
@@ -223,13 +224,19 @@ pub async fn copy_to_assets_dir(
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Error, Debug, Clone)]
 pub enum IOError {
+    #[error("The dialog was closed.")]
     DialogClosed,
+    #[error("IO error occurred: {0}")]
     IO(io::ErrorKind),
+    #[error("OS error {0} occurred {err}", err = io::Error::from_raw_os_error(*.0).kind())]
     OSError(i32),
+    #[error("Deserialization failed at {pos}: {err}", pos = .0.position, err = .0.code)]
     DeserializationFailed(ron::de::SpannedError),
+    #[error("File is not a valid asset.")]
     InvalidAsset,
+    #[error("Can't complete operation without any folder being loaded.")]
     NoFolderLoaded,
 }
 
