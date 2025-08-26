@@ -58,7 +58,7 @@ fn new_key<V>(map: &HashMap<u32, V>) -> u32 {
 }
 
 pub async fn load_dir(path: PathBuf) -> Result<HashMap<u32, (AssetPath, Asset)>, IOError> {
-    let index_path = path.join(".meta.ron");
+    let index_path = path.join(".index.ron");
 
     let mut index_file = match File::options()
         .read(true)
@@ -86,11 +86,7 @@ pub async fn load_dir(path: PathBuf) -> Result<HashMap<u32, (AssetPath, Asset)>,
 
     for kind in AssetKind::all() {
         let dir: Vec<_> = std::fs::read_dir(path.join(kind.folder()))?
-            .filter_map(|entry| {
-                entry
-                    .ok()
-                    .and_then(|entry| (!entry.file_name().eq(".meta.ron")).then_some(entry))
-            })
+            .filter_map(|entry| entry.ok())
             .collect();
 
         let current_index_size = index
