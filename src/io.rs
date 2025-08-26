@@ -215,6 +215,29 @@ pub async fn copy_to_assets_dir(
     }
 }
 
+pub fn write_index(
+    index: &HashMap<u32, AssetPath>,
+    assets_folder: Option<PathBuf>,
+) -> Result<(), IOError> {
+    let Some(assets_folder) = assets_folder else {
+        return Err(IOError::NoFolderLoaded);
+    };
+
+    let parsed_data = ron::ser::to_string_pretty(index, PrettyConfig::new())?;
+
+    let index_path = assets_folder.join(".index.ron");
+
+    let mut index_file = File::options()
+        .write(true)
+        .truncate(true)
+        .create(true)
+        .open(index_path)?;
+
+    index_file.write_all(parsed_data.as_bytes())?;
+
+    Ok(())
+}
+
 #[derive(Error, Debug, Clone)]
 pub enum IOError {
     #[error("The dialog was closed.")]
@@ -229,6 +252,8 @@ pub enum IOError {
     InvalidAsset,
     #[error("Can't complete operation without any folder being loaded.")]
     NoFolderLoaded,
+    #[error("")]
+    FormatError(ron::Error),
 }
 
 impl From<std::io::Error> for IOError {
@@ -243,5 +268,11 @@ impl From<std::io::Error> for IOError {
 impl From<ron::de::SpannedError> for IOError {
     fn from(value: ron::de::SpannedError) -> Self {
         Self::DeserializationFailed(value)
+    }
+}
+
+impl From<ron::Error> for IOError {
+    fn from(value: ron::Error) -> Self {
+        Self::FormatError(value)
     }
 }

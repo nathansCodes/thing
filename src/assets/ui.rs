@@ -4,14 +4,17 @@ use iced::{
     Alignment, Element,
     Length::Fill,
     Task,
-    widget::{self, button, column, row, scrollable, text, text_input},
+    widget::{self, button, column, container, row, scrollable, text, text_input},
 };
+use iced_aw::ContextMenu;
 
 use crate::{
-    assets::{Asset, AssetHandle, AssetKind, AssetsData, AssetsMessage, Image, ViewMode},
-    io::{IOError, load_dir},
+    assets::{
+        Asset, AssetHandle, AssetKind, AssetPath, AssetsData, AssetsMessage, Image, ViewMode,
+    },
+    io::{IOError, load_dir, write_index},
     style,
-    widgets::{dnd::dnd_provider, dropdown, icons},
+    widgets::{self, dnd::dnd_provider, dropdown, icons},
 };
 
 pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMessage> {
@@ -70,26 +73,72 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
             state.view_dropdown_open = !state.view_dropdown_open;
             Task::none()
         }
+        AssetsMessage::SetRenameInput(val) => {
+            state.renaming = val;
+            Task::none()
+        }
+        AssetsMessage::RenameAsset => {
+            let Some((handle, new_name)) = state.renaming.take() else {
+                return Task::none();
+            };
+
+            let Some(old_path) = state.index.get(&handle.0).cloned() else {
+                return Task::none();
+            };
+
+            let new_path = AssetPath::new(old_path.kind(), new_name.clone());
+
+            state.index.insert(handle.0, new_path.clone());
+
+            let folder = state.folder.clone().unwrap();
+
+            if let Err(err) =
+                std::fs::rename(folder.clone() + old_path.clone(), folder + new_path.clone())
+            {
+                return Task::done(AssetsMessage::RenameAssetFailed(IOError::from(err), handle));
+            };
+
+            let res = write_index(&state.index, state.folder.clone());
+
+            match res {
+                Ok(_) => {
+                    let asset = state.assets.remove(&old_path).unwrap();
+                    state.assets.insert(new_path.clone(), asset);
+
+                    Task::none()
+                }
+                Err(err) => Task::done(AssetsMessage::RenameAssetFailed(err, handle)),
+            }
+        }
+        AssetsMessage::RenameAssetFailed(..) => Task::none(),
     }
 }
 
 fn image_item<'a>(
     i: usize,
     handle: AssetHandle,
-    view: ViewMode,
+    state: &'a AssetsData,
     img: &'a Image,
 ) -> Element<'a, AssetsMessage, iced::Theme, iced::Renderer> {
+    let rename_input = state.renaming.as_ref().map(|(rn_handle, input)| {
+        text_input("Rename...", input.as_str())
+            .on_input(|input| AssetsMessage::SetRenameInput(Some((*rn_handle, input))))
+            .on_submit(AssetsMessage::RenameAsset)
+    });
+
     dnd_provider(
         AssetsMessage::SetPayload,
         crate::Draggable::Asset(handle),
-        match view {
+        match state.view_mode {
             ViewMode::Thumbnails => button(
                 column![
                     widget::image(&img.handle)
                         .height(100.0)
                         .width(100.0)
                         .filter_method(widget::image::FilterMethod::Nearest),
-                    text(img.file_name.clone()).width(100.0).center()
+                    rename_input
+                        .map(|ri| Element::from(ri.width(100.0).align_x(Alignment::Center)))
+                        .unwrap_or(text(img.file_name.clone()).width(100.0).center().into())
                 ]
                 .spacing(5.0)
                 .padding(5.0),
@@ -103,7 +152,9 @@ fn image_item<'a>(
                         .height(30)
                         .width(30)
                         .filter_method(widget::image::FilterMethod::Nearest),
-                    text(img.file_name.clone())
+                    rename_input
+                        .map(Element::from)
+                        .unwrap_or(text(img.file_name.clone()).into())
                 ]
                 .width(Fill)
                 .height(40)
@@ -141,10 +192,23 @@ pub fn view(state: &AssetsData) -> Element<'_, AssetsMessage> {
 
             images.sort_by(|a, b| a.0.cmp(&b.0));
 
-            let images = images
-                .into_iter()
-                .enumerate()
-                .map(|(i, (id, img))| image_item(i, AssetHandle(id), state.view_mode, img));
+            let images = images.into_iter().enumerate().map(|(i, (id, img))| {
+                let img_element = image_item(i, AssetHandle(id), state, img);
+
+                ContextMenu::new(img_element, move || {
+                    container(column![widgets::menu_button(
+                        "Rename",
+                        AssetsMessage::SetRenameInput(Some((
+                            AssetHandle(id),
+                            img.file_name.clone()
+                        )))
+                    )])
+                    .padding(4)
+                    .style(style::dropdown)
+                    .into()
+                })
+                .into()
+            });
 
             let layout = match state.view_mode {
                 ViewMode::Thumbnails => Element::from(row(images).spacing(5).width(Fill).wrap()),

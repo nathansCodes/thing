@@ -32,7 +32,7 @@ impl Asset {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AssetHandle(u32);
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -84,6 +84,7 @@ pub struct AssetsData {
     error_state: Option<IOError>,
     filter: String,
     folder: Option<PathBuf>,
+    renaming: Option<(AssetHandle, String)>,
 }
 
 impl Index<AssetHandle> for AssetsData {
@@ -155,4 +156,7 @@ pub enum AssetsMessage {
     FilterChanged(String),
     ViewChanged(ViewMode),
     ShowHideDropdown,
+    SetRenameInput(Option<(AssetHandle, String)>),
+    RenameAsset,
+    RenameAssetFailed(IOError, AssetHandle),
 }

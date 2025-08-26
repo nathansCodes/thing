@@ -48,6 +48,14 @@ impl Display for AssetPath {
     }
 }
 
+impl Add<AssetPath> for &PathBuf {
+    type Output = PathBuf;
+
+    fn add(self, rhs: AssetPath) -> Self::Output {
+        self.join(format!("{}", rhs))
+    }
+}
+
 impl Add<AssetPath> for PathBuf {
     type Output = PathBuf;
 
