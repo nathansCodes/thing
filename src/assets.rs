@@ -6,7 +6,7 @@ pub use asset_path::AssetPath;
 pub use image::Image;
 pub use ui::{update, view};
 
-use std::{collections::HashMap, ops::Index, path::PathBuf};
+use std::{collections::HashMap, ops::Index, path::PathBuf, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 
@@ -51,16 +51,16 @@ impl AssetKind {
     // NOTE: update this whenever a new kind of asset is added
     // tried forcing this by also making use of a match but I can't because of temporary value
     // shenanigans
-    pub fn folders() -> &'static [&'static str] {
-        &["images"]
+    pub fn all() -> &'static [Self] {
+        &[Self::Image]
     }
 }
 
-impl TryFrom<&str> for AssetKind {
-    type Error = ();
+impl FromStr for AssetKind {
+    type Err = ();
 
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value.to_lowercase().as_str() {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
             "images" | "image" => Ok(Self::Image),
             _ => Err(()),
         }
@@ -96,10 +96,9 @@ impl Index<AssetHandle> for AssetsData {
 
 impl AssetsData {
     pub fn get(&self, handle: AssetHandle) -> Option<&Asset> {
-        self.index.get(&handle.0).and_then(|asset_path| {
-            println!("{asset_path:?}");
-            self.assets.get(asset_path)
-        })
+        self.index
+            .get(&handle.0)
+            .and_then(|asset_path| self.assets.get(asset_path))
     }
 
     #[allow(unused)]

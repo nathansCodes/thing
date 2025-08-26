@@ -9,22 +9,9 @@ use std::{
 use file_type::FileType;
 use iced::{futures::io, widget::image};
 use ron::ser::PrettyConfig;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::assets::{self, Asset, AssetPath};
-
-#[derive(Serialize, Deserialize, Debug, Default)]
-struct Metadata {
-    ids: HashMap<u32, AssetPath>,
-}
-
-impl Metadata {
-    fn new_key(&self) -> u32 {
-        let keys: Vec<&u32> = self.ids.keys().collect();
-        (0..).into_iter().find(|id| !keys.contains(&id)).unwrap()
-    }
-}
+use crate::assets::{self, Asset, AssetKind, AssetPath};
 
 pub async fn pick_file() -> Result<PathBuf, IOError> {
     let file_handle = rfd::AsyncFileDialog::new()
@@ -65,76 +52,84 @@ pub async fn load(path: PathBuf) -> Result<String, IOError> {
     Ok(data)
 }
 
-pub async fn load_dir(path: PathBuf) -> Result<HashMap<u32, (AssetPath, Asset)>, IOError> {
-    let metadata_path = path.join(".meta.ron");
+fn new_key<V>(map: &HashMap<u32, V>) -> u32 {
+    let keys: Vec<&u32> = map.keys().collect();
+    (0..).into_iter().find(|id| !keys.contains(&id)).unwrap()
+}
 
-    let mut metadata_file = match File::options()
+pub async fn load_dir(path: PathBuf) -> Result<HashMap<u32, (AssetPath, Asset)>, IOError> {
+    let index_path = path.join(".meta.ron");
+
+    let mut index_file = match File::options()
         .read(true)
         .write(true)
-        .open(metadata_path.clone())
+        .create(true)
+        .truncate(false)
+        .open(index_path.clone())
     {
-        Ok(metadata_file) => metadata_file,
+        Ok(index_file) => index_file,
         Err(err) => match err.kind() {
-            ErrorKind::NotFound => File::create_new(metadata_path)?,
+            ErrorKind::NotFound => File::create_new(index_path)?,
             _ => return Err(IOError::from(err)),
         },
     };
 
-    let mut metadata_contents = String::new();
+    let mut index_file_contents = String::new();
 
-    metadata_file.read_to_string(&mut metadata_contents)?;
+    index_file.read_to_string(&mut index_file_contents)?;
 
-    let mut metadata: Metadata = if metadata_contents.trim().is_empty() {
-        Metadata::default()
+    let mut index: HashMap<u32, AssetPath> = if index_file_contents.trim().is_empty() {
+        HashMap::default()
     } else {
-        ron::de::from_str(&metadata_contents)?
+        ron::de::from_str(&index_file_contents)?
     };
 
-    let dir: Vec<_> = std::fs::read_dir(path.clone())?
-        .filter_map(|entry| {
-            entry
-                .ok()
-                .and_then(|entry| (!entry.file_name().eq(".meta.ron")).then_some(entry))
-        })
-        .collect();
+    for kind in AssetKind::all() {
+        let dir: Vec<_> = std::fs::read_dir(path.join(kind.folder()))?
+            .filter_map(|entry| {
+                entry
+                    .ok()
+                    .and_then(|entry| (!entry.file_name().eq(".meta.ron")).then_some(entry))
+            })
+            .collect();
 
-    if metadata.ids.len() < dir.len() {
-        for entry in dir {
-            let folder_name = path
-                .file_name()
-                .map(|file_name| file_name.to_string_lossy().to_string())
-                .unwrap_or("".to_string());
-            let file_name = entry.file_name().to_string_lossy().to_string();
+        let current_index_size = index
+            .iter()
+            .filter(|(_, path)| path.kind() == *kind)
+            .count();
 
-            let mut asset_path = folder_name + "/";
-            asset_path.push_str(&file_name);
+        if current_index_size < dir.len() {
+            for entry in dir {
+                let file_name = entry.file_name().to_string_lossy().to_string();
 
-            if !metadata
-                .ids
-                .values()
-                .any(|path| path.to_string().eq(&asset_path))
-                && let Ok(asset_path) = AssetPath::try_from(asset_path.as_str())
-            {
-                let id = metadata.new_key();
-                metadata.ids.insert(id, asset_path);
+                let asset_path = AssetPath::new(*kind, file_name);
+
+                if !index.values().any(|path| path == &asset_path)
+                    && let Ok(asset_path) = AssetPath::try_from(asset_path.to_string().as_str())
+                {
+                    let id = new_key(&index);
+                    index.insert(id, asset_path);
+                }
             }
-        }
 
-        if let Ok(metadata_str) = ron::ser::to_string_pretty(&metadata, PrettyConfig::new()) {
-            match metadata_file.write_all_at(metadata_str.as_bytes(), 0) {
-                Ok(_) => (),
-                Err(err) => {
+            if let Ok(index_str) = ron::ser::to_string_pretty(&index, PrettyConfig::new()) {
+                if let Err(err) = index_file.set_len(0) {
                     eprintln!("{err}");
+                };
+                match index_file.write_all_at(index_str.as_bytes(), 0) {
+                    Ok(_) => (),
+                    Err(err) => {
+                        eprintln!("{err}");
+                    }
                 }
             }
         }
     }
 
-    let assets = metadata
-        .ids
+    let assets = index
         .into_iter()
         .filter_map(|(id, entry)| {
-            let path = path.join(entry.name());
+            let path = path.join(entry.to_string());
 
             let mut file = File::open(path.clone()).ok()?;
 

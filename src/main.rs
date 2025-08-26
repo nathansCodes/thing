@@ -4,7 +4,7 @@ mod notification;
 mod style;
 mod widgets;
 
-use crate::assets::{Asset, AssetHandle, Image};
+use crate::assets::{Asset, AssetHandle, AssetKind, Image};
 use crate::notification::Notification;
 use crate::widgets::dialog::{Dialog, DialogOption};
 use crate::widgets::dnd::{dnd_indicator, dnd_receiver};
@@ -30,6 +30,7 @@ use iced_aw::{menu, menu::Item, menu_bar};
 use serde::{Deserialize, Serialize};
 use std::io::ErrorKind;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::time::Duration;
 
 use crate::{
@@ -396,7 +397,11 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     .iter()
                     .filter(|entry| {
                         entry.as_ref().is_ok_and(|entry| {
-                            entry.path().is_dir() && entry.file_name() == "images"
+                            entry.path().is_dir()
+                                && AssetKind::from_str(
+                                    entry.file_name().as_os_str().to_str().unwrap(),
+                                )
+                                .is_ok()
                         })
                     })
                     .count()
@@ -405,7 +410,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.dialog = Some(Dialog::new(
                     "Are you sure you want to load this folder?",
                     format!(
-                        "Directory {path:?} already contains files. Are you sure you want to use it this folder?"
+                        "Directory {path:?} already contains files. Are you sure you want to use this folder?"
                     ),
                     Message::CloseDialog,
                     vec![DialogOption::new(

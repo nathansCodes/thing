@@ -1,4 +1,4 @@
-use std::{fmt::Display, ops::Add, path::PathBuf};
+use std::{fmt::Display, ops::Add, path::PathBuf, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 
@@ -33,7 +33,7 @@ impl TryFrom<&str> for AssetPath {
     fn try_from(name: &str) -> Result<Self, Self::Error> {
         let mut components = name.split('/');
 
-        let kind = AssetKind::try_from(components.next().ok_or(())?)?;
+        let kind = AssetKind::from_str(components.next().ok_or(())?)?;
 
         Ok(AssetPath {
             kind,
