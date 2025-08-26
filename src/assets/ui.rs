@@ -16,16 +16,10 @@ use crate::{
 
 pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMessage> {
     match message {
-        AssetsMessage::LoadAssets(mut path) => {
+        AssetsMessage::LoadAssets(path) => {
             if !path.is_dir() {
                 return Task::none();
             }
-
-            let subfolder = match state.view {
-                AssetKind::Image => "images",
-            };
-
-            path.push(subfolder);
 
             let create_dir = async |path| -> io::Result<()> { std::fs::create_dir(path) };
 
