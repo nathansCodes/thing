@@ -111,6 +111,10 @@ impl AssetsData {
         })
     }
 
+    pub fn path(&self, handle: AssetHandle) -> Option<&AssetPath> {
+        self.index.get(&handle.0)
+    }
+
     pub fn add(
         &mut self,
         file_name: impl Into<String>,
