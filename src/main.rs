@@ -142,6 +142,7 @@ enum Message {
     SetDragPayload(Option<Draggable>),
     DropAssetOnGraph(AssetHandle, Point),
     CloseDialog,
+    EscapePressed,
 }
 
 fn view(state: &State) -> Element<'_, Message> {
@@ -747,6 +748,15 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             state.dialog = None;
             Task::none()
         }
+        Message::EscapePressed => {
+            if state.dialog.is_some() {
+                Task::done(Message::CloseDialog)
+            } else if state.assets.query_present() {
+                Task::done(Message::AssetsMessage(AssetsMessage::QueryChanged(None)))
+            } else {
+                Task::none()
+            }
+        }
     }
 }
 
@@ -761,7 +771,7 @@ fn subscription(_state: &State) -> Subscription<Message> {
             (Modifiers::CTRL, Key::Character(char)) if char.eq("a") => {
                 Some(Message::GraphEvent(GraphEvent::SelectAll))
             }
-            (_, Key::Named(Named::Escape)) if modifiers.is_empty() => Some(Message::CloseDialog),
+            (_, Key::Named(Named::Escape)) if modifiers.is_empty() => Some(Message::EscapePressed),
             _ => None,
         }),
         iced::time::every(Duration::from_millis(20)).map(|_| Message::Tick),
