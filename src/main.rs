@@ -771,6 +771,9 @@ fn subscription(_state: &State) -> Subscription<Message> {
             (Modifiers::CTRL, Key::Character(char)) if char.eq("a") => {
                 Some(Message::GraphEvent(GraphEvent::SelectAll))
             }
+            (Modifiers::CTRL, Key::Character(char)) if char.eq("f") => Some(
+                Message::AssetsMessage(AssetsMessage::QueryChanged(Some("".to_string()))),
+            ),
             (_, Key::Named(Named::Escape)) if modifiers.is_empty() => Some(Message::EscapePressed),
             _ => None,
         }),
