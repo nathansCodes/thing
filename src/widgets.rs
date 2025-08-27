@@ -168,7 +168,9 @@ pub fn dropdown<'a, Message: Clone + 'a>(
         .padding(4.0)
         .style(style::dropdown),
     )
-    .on_press(show_hide_dropdown);
+    .on_press(show_hide_dropdown.clone());
 
-    DropDown::new(underlay, overlay, dropdown_open).width(200.0)
+    DropDown::new(underlay, overlay, dropdown_open)
+        .width(200.0)
+        .on_dismiss(show_hide_dropdown)
 }
