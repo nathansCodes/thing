@@ -2,9 +2,12 @@ use std::io;
 
 use iced::{
     Alignment, Element,
-    Length::Fill,
+    Length::{Fill, Shrink},
     Task,
-    widget::{self, button, column, container, row, scrollable, text, text_input},
+    widget::{
+        self, button, column, container, horizontal_space, responsive, row, scrollable, text,
+        text_input,
+    },
 };
 use iced_aw::ContextMenu;
 
@@ -61,8 +64,8 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
         }
         AssetsMessage::OpenAsset(handle) => Task::done(AssetsMessage::OpenAsset(handle)),
         AssetsMessage::SetPayload(payload) => Task::done(AssetsMessage::SetPayload(payload)),
-        AssetsMessage::FilterChanged(text) => {
-            state.filter = text;
+        AssetsMessage::QueryChanged(text) => {
+            state.query = text;
             Task::none()
         }
         AssetsMessage::ViewChanged(view) => {
@@ -183,7 +186,7 @@ pub fn view(state: &AssetsData) -> Element<'_, AssetsMessage> {
                         asset_path
                             .to_string()
                             .to_lowercase()
-                            .contains(&state.filter.to_lowercase())
+                            .contains(&state.query().to_lowercase())
                             .then_some(asset_path)
                             // WARNING: change to .and_then when adding new types of assets
                             .map(|path| match asset {
@@ -220,45 +223,67 @@ pub fn view(state: &AssetsData) -> Element<'_, AssetsMessage> {
         }
     };
 
-    let dropdown = dropdown(
-        state.view_dropdown_open,
-        AssetsMessage::ShowHideDropdown,
-        match state.view_mode {
-            ViewMode::Thumbnails => icons::thumbnails(),
-            ViewMode::List => icons::list(),
-        },
-        [
-            (
-                icons::THUMBNAILS,
-                "Thumbnails",
-                AssetsMessage::ViewChanged(ViewMode::Thumbnails),
-            ),
-            (
-                icons::LIST,
-                "List",
-                AssetsMessage::ViewChanged(ViewMode::List),
-            ),
-        ]
-        .into_iter(),
-    );
+    let top_row = responsive(move |size| {
+        let dropdown = dropdown(
+            state.view_dropdown_open,
+            AssetsMessage::ShowHideDropdown,
+            match state.view_mode {
+                ViewMode::Thumbnails => icons::thumbnails(),
+                ViewMode::List => icons::list(),
+            },
+            [
+                (
+                    icons::THUMBNAILS,
+                    "Thumbnails",
+                    AssetsMessage::ViewChanged(ViewMode::Thumbnails),
+                ),
+                (
+                    icons::LIST,
+                    "List",
+                    AssetsMessage::ViewChanged(ViewMode::List),
+                ),
+            ]
+            .into_iter(),
+        );
 
-    column![
-        row![
-            text_input("Search...", &state.filter)
-                .on_input(AssetsMessage::FilterChanged)
+        let search_button = button(icons::search().center())
+            .width(30)
+            .on_press(AssetsMessage::QueryChanged(Some("".to_string())))
+            .style(style::menu_button);
+
+        let top_right_row = row![dropdown].spacing(4.0);
+
+        if let Some(query) = &state.query {
+            let search_bar = text_input("Search...", query)
+                .on_input(|input| AssetsMessage::QueryChanged(Some(input)))
                 .icon(text_input::Icon {
                     font: icons::ICON_FONT,
                     code_point: icons::SEARCH,
                     size: None,
                     spacing: 4.0,
-                    side: text_input::Side::Left
+                    side: text_input::Side::Left,
                 })
-                .style(style::text_input),
-            dropdown
-        ]
-        .spacing(4.0),
-        content,
-    ]
-    .spacing(4.0)
-    .into()
+                .style(style::text_input);
+
+            if size.width <= 300.0 {
+                search_bar.into()
+            } else {
+                row![
+                    container(container(search_bar).width(Fill).max_width(300)).align_left(Fill),
+                    horizontal_space().width(Shrink),
+                    top_right_row
+                ]
+                .spacing(4)
+                .into()
+            }
+        } else {
+            row![search_button, horizontal_space(), top_right_row]
+                .spacing(4)
+                .into()
+        }
+    });
+
+    column![container(top_row).height(30), content,]
+        .spacing(4.0)
+        .into()
 }

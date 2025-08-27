@@ -82,7 +82,7 @@ pub struct AssetsData {
     assets: HashMap<AssetPath, Asset>,
     index: HashMap<u32, AssetPath>,
     error_state: Option<IOError>,
-    filter: String,
+    query: Option<String>,
     folder: Option<PathBuf>,
     renaming: Option<(AssetHandle, String)>,
 }
@@ -148,6 +148,14 @@ impl AssetsData {
     pub fn set_folder(&mut self, folder: PathBuf) {
         self.folder = Some(folder);
     }
+
+    pub fn query(&self) -> &str {
+        self.query.as_deref().unwrap_or("")
+    }
+
+    pub fn query_present(&self) -> bool {
+        self.query.is_some()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -157,7 +165,7 @@ pub enum AssetsMessage {
     LoadFailed(IOError),
     OpenAsset(AssetHandle),
     SetPayload(Option<crate::Draggable>),
-    FilterChanged(String),
+    QueryChanged(Option<String>),
     ViewChanged(ViewMode),
     ShowHideDropdown,
     SetRenameInput(Option<(AssetHandle, String)>),
