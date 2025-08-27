@@ -117,6 +117,7 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
 fn image_item<'a>(
     i: usize,
     handle: AssetHandle,
+    path: &'a AssetPath,
     state: &'a AssetsData,
     img: &'a Image,
 ) -> Element<'a, AssetsMessage, iced::Theme, iced::Renderer> {
@@ -125,6 +126,8 @@ fn image_item<'a>(
             .on_input(|input| AssetsMessage::SetRenameInput(Some((*rn_handle, input))))
             .on_submit(AssetsMessage::RenameAsset)
     });
+
+    let file_name = path.name();
 
     dnd_provider(
         AssetsMessage::SetPayload,
@@ -138,7 +141,7 @@ fn image_item<'a>(
                         .filter_method(widget::image::FilterMethod::Nearest),
                     rename_input
                         .map(|ri| Element::from(ri.width(100.0).align_x(Alignment::Center)))
-                        .unwrap_or(text(img.file_name.clone()).width(100.0).center().into())
+                        .unwrap_or(text(file_name).width(100.0).center().into())
                 ]
                 .spacing(5.0)
                 .padding(5.0),
@@ -154,7 +157,7 @@ fn image_item<'a>(
                         .filter_method(widget::image::FilterMethod::Nearest),
                     rename_input
                         .map(Element::from)
-                        .unwrap_or(text(img.file_name.clone()).into())
+                        .unwrap_or(text(file_name).into())
                 ]
                 .width(Fill)
                 .height(40)
@@ -181,10 +184,10 @@ pub fn view(state: &AssetsData) -> Element<'_, AssetsMessage> {
                             .to_string()
                             .to_lowercase()
                             .contains(&state.filter.to_lowercase())
-                            .then_some(())
+                            .then_some(asset_path)
                             // WARNING: change to .and_then when adding new types of assets
-                            .map(|_| match asset {
-                                Asset::Image(img) => (*id, img),
+                            .map(|path| match asset {
+                                Asset::Image(img) => (*id, path, img),
                             })
                     })
                 })
@@ -192,16 +195,14 @@ pub fn view(state: &AssetsData) -> Element<'_, AssetsMessage> {
 
             images.sort_by(|a, b| a.0.cmp(&b.0));
 
-            let images = images.into_iter().enumerate().map(|(i, (id, img))| {
-                let img_element = image_item(i, AssetHandle(id), state, img);
+            let images = images.into_iter().enumerate().map(|(i, (id, path, img))| {
+                let handle = AssetHandle(id);
+                let img_element = image_item(i, handle, path, state, img);
 
                 ContextMenu::new(img_element, move || {
                     container(column![widgets::menu_button(
                         "Rename",
-                        AssetsMessage::SetRenameInput(Some((
-                            AssetHandle(id),
-                            img.file_name.clone()
-                        )))
+                        AssetsMessage::SetRenameInput(Some((handle, path.to_string())))
                     )])
                     .padding(4)
                     .style(style::dropdown)

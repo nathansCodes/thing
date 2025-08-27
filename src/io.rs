@@ -147,7 +147,6 @@ pub async fn load_dir(path: PathBuf) -> Result<HashMap<u32, (AssetPath, Asset)>,
                     (
                         AssetPath::new(assets::AssetKind::Image, file_name.clone()),
                         Asset::Image(assets::Image {
-                            file_name,
                             handle: image::Handle::from_bytes(buffer),
                         }),
                     ),
@@ -172,15 +171,12 @@ pub async fn load_file(path: &Path) -> Result<Asset, IOError> {
 
     let file_type = FileType::try_from_reader(reader).expect("File type not found!");
 
-    let file_name = path.file_name().unwrap().to_string_lossy().to_string();
-
     if file_type
         .media_types()
         .iter()
         .any(|media| media.starts_with("image"))
     {
         Ok(Asset::Image(assets::Image {
-            file_name,
             handle: image::Handle::from_bytes(buffer),
         }))
     } else {
