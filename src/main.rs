@@ -345,9 +345,17 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     return Task::none();
                 };
                 match asset {
-                    Asset::Image(img) => Task::done(Message::AddCharacter(
+                    Asset::Image(_) => Task::done(Message::AddCharacter(
                         Character {
-                            name: img.file_name.split('.').next().unwrap().to_string(),
+                            name: state
+                                .assets
+                                .path(handle)
+                                .unwrap()
+                                .name()
+                                .split('.')
+                                .next()
+                                .unwrap()
+                                .to_string(),
                             img: handle,
                         },
                         Point::ORIGIN + state.graph_position,
@@ -717,10 +725,13 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::DropAssetOnGraph(handle, relative_cursor_pos) => {
             state.dnd_payload = None;
             match &state.assets[handle] {
-                Asset::Image(image) => Task::done(Message::AddCharacter(
+                Asset::Image(_) => Task::done(Message::AddCharacter(
                     Character {
-                        name: image
-                            .file_name
+                        name: state
+                            .assets
+                            .path(handle)
+                            .unwrap()
+                            .name()
                             .split('.')
                             .next()
                             .unwrap_or("name")
