@@ -6,20 +6,21 @@ pub mod icons;
 
 pub use dialog::dialog;
 use iced::{
-    Alignment, Element, Font,
+    Alignment, Border, Element, Font,
     Length::Fill,
-    Padding,
+    Padding, Theme,
     advanced::widget::Text,
     font::Weight,
     widget::{
-        Container, button, column, container, horizontal_rule, horizontal_space, mouse_area, row,
-        scrollable, text,
+        Container, button, column, container, horizontal_rule, horizontal_space, image, mouse_area,
+        opaque, row, scrollable, text,
     },
 };
 use iced_aw::DropDown;
 
 use crate::{
-    Message,
+    Message, Node,
+    assets::{AssetsData, Image, image::default_image},
     notification::Notification,
     style,
     widgets::graph::{Graph, GraphData, GraphNode},
@@ -173,4 +174,50 @@ pub fn dropdown<'a, Message: Clone + 'a>(
     DropDown::new(underlay, overlay, dropdown_open)
         .width(200.0)
         .on_dismiss(show_hide_dropdown)
+}
+
+#[allow(clippy::type_complexity)]
+pub fn node<'a>(
+    assets: &'a AssetsData,
+) -> Box<dyn for<'any> Fn(&'any GraphNode<Node>) -> Element<'any, Message> + 'a> {
+    Box::new(|node| match node.data() {
+        Node::Character(chara) => container(
+            column![
+                image(
+                    assets
+                        .get(chara.img)
+                        .and_then(|asset| Image::try_from(asset).ok())
+                        .map(|img| img.handle)
+                        .unwrap_or(default_image())
+                )
+                .width(Fill)
+                .height(Fill)
+                .filter_method(image::FilterMethod::Nearest),
+                opaque(
+                    column![
+                        text(&chara.name).center().width(Fill),
+                        base_button("ahkdlfjs").on_press(Message::CharacterButtonPressed)
+                    ]
+                    .width(Fill)
+                    .spacing(5.0)
+                ),
+            ]
+            .spacing(5.0),
+        )
+        .width(150.0)
+        .height(150.0)
+        .padding(5.0)
+        .style(style::node(node.selected()))
+        .into(),
+        Node::Family => container("")
+            .width(10.0)
+            .height(10.0)
+            .style(|theme: &Theme| container::Style {
+                text_color: None,
+                background: Some(theme.palette().success.into()),
+                border: Border::default().rounded(10.0),
+                ..Default::default()
+            })
+            .into(),
+    })
 }
