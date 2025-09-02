@@ -15,7 +15,7 @@ use crate::{
     assets::{
         Asset, AssetHandle, AssetKind, AssetPath, AssetsData, AssetsMessage, Image, ViewMode,
     },
-    io::{IOError, load_dir, write_index},
+    io::{AssetsError, load_dir, write_index},
     style,
     widgets::{self, dnd::dnd_provider, dropdown, icons},
 };
@@ -27,29 +27,28 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
                 return Task::none();
             }
 
-            let create_dir = async |path| -> io::Result<()> { std::fs::create_dir(path) };
-
-            if !path.exists() {
-                Task::perform(create_dir(path.clone()), move |result| match result {
-                    Ok(_) => {
-                        let mut path = path.clone();
-                        path.pop();
-                        AssetsMessage::LoadAssets(path)
-                    }
-                    Err(err) => AssetsMessage::LoadFailed(IOError::IO(err.kind())),
-                })
-            } else if !path.is_dir() {
-                Task::done(AssetsMessage::LoadFailed(IOError::IO(
-                    io::ErrorKind::AlreadyExists,
-                )))
-            } else {
-                Task::perform(load_dir(path), |files_maybe| match files_maybe {
-                    Ok(files) => AssetsMessage::LoadCompleted(files),
-                    Err(err) => AssetsMessage::LoadFailed(err),
-                })
+            if !path.exists()
+                && let Err(err) = std::fs::create_dir(path.clone())
+            {
+                return Task::done(AssetsMessage::LoadFailed(AssetsError::IO(err.kind())));
             }
+
+            let message = if !path.is_dir() {
+                AssetsMessage::LoadFailed(AssetsError::IO(io::ErrorKind::AlreadyExists))
+            } else {
+                match load_dir(path.clone()) {
+                    Ok(files) => AssetsMessage::LoadCompleted(path, files),
+                    Err(err) => {
+                        let err = err.downcast_ref::<AssetsError>().unwrap();
+
+                        AssetsMessage::LoadFailed(err.clone())
+                    }
+                }
+            };
+
+            Task::done(message)
         }
-        AssetsMessage::LoadCompleted(assets) => {
+        AssetsMessage::LoadCompleted(_, assets) => {
             for (id, (asset_path, asset)) in assets.into_iter() {
                 state.index.insert(id, asset_path.clone());
                 state.assets.insert(asset_path, asset);
@@ -98,7 +97,10 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
             if let Err(err) =
                 std::fs::rename(folder.clone() + old_path.clone(), folder + new_path.clone())
             {
-                return Task::done(AssetsMessage::RenameAssetFailed(IOError::from(err), handle));
+                return Task::done(AssetsMessage::RenameAssetFailed(
+                    AssetsError::from(err),
+                    handle,
+                ));
             };
 
             let res = write_index(&state.index, state.folder.clone());
@@ -110,7 +112,12 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
 
                     Task::none()
                 }
-                Err(err) => Task::done(AssetsMessage::RenameAssetFailed(err, handle)),
+                Err(err) => {
+                    if let Some(err) = err.downcast_ref::<AssetsError>() {
+                        return Task::done(AssetsMessage::RenameAssetFailed(err.clone(), handle));
+                    }
+                    Task::none()
+                }
             }
         }
         AssetsMessage::RenameAssetFailed(..) => Task::none(),

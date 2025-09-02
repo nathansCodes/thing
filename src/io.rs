@@ -6,6 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use anyhow::{Result, anyhow};
 use file_type::FileType;
 use iced::{futures::io, widget::image};
 use ron::ser::PrettyConfig;
@@ -13,28 +14,26 @@ use thiserror::Error;
 
 use crate::assets::{self, Asset, AssetKind, AssetPath};
 
-pub async fn pick_file() -> Result<PathBuf, IOError> {
-    let file_handle = rfd::AsyncFileDialog::new()
+pub fn pick_file() -> Result<PathBuf> {
+    let file_handle = rfd::FileDialog::new()
         .set_title("Select an Image")
         .add_filter("Image", &["webp", "png", "jpeg", "jpg"])
         .pick_file()
-        .await
-        .ok_or(IOError::DialogClosed)?;
+        .ok_or(AssetsError::DialogClosed)?;
 
-    Ok(file_handle.path().to_path_buf())
+    Ok(file_handle)
 }
 
-pub async fn pick_folder() -> Result<PathBuf, IOError> {
-    let file_handle = rfd::AsyncFileDialog::new()
+pub fn pick_folder() -> Result<PathBuf> {
+    let file_handle = rfd::FileDialog::new()
         .set_title("Open a Folder")
         .pick_folder()
-        .await
-        .ok_or(IOError::DialogClosed)?;
+        .ok_or(AssetsError::DialogClosed)?;
 
-    Ok(file_handle.path().to_path_buf())
+    Ok(file_handle)
 }
 
-pub async fn save(path: PathBuf, data: String) -> Result<(), std::io::Error> {
+pub fn save(path: PathBuf, data: String) -> Result<()> {
     let mut file = File::create(path)?;
 
     file.write_all(data.as_bytes())?;
@@ -42,7 +41,7 @@ pub async fn save(path: PathBuf, data: String) -> Result<(), std::io::Error> {
     Ok(())
 }
 
-pub async fn load(path: PathBuf) -> Result<String, IOError> {
+pub fn load(path: PathBuf) -> Result<String> {
     let mut file = File::open(path.join("data.ron"))?;
 
     let mut data = String::new();
@@ -57,7 +56,7 @@ fn new_key<V>(map: &HashMap<u32, V>) -> u32 {
     (0..).into_iter().find(|id| !keys.contains(&id)).unwrap()
 }
 
-pub async fn load_dir(path: PathBuf) -> Result<HashMap<u32, (AssetPath, Asset)>, IOError> {
+pub fn load_dir(path: PathBuf) -> Result<HashMap<u32, (AssetPath, Asset)>> {
     let index_path = path.join(".index.ron");
 
     let mut index_file = match File::options()
@@ -70,7 +69,7 @@ pub async fn load_dir(path: PathBuf) -> Result<HashMap<u32, (AssetPath, Asset)>,
         Ok(index_file) => index_file,
         Err(err) => match err.kind() {
             ErrorKind::NotFound => File::create_new(index_path)?,
-            _ => return Err(IOError::from(err)),
+            _ => return Err(anyhow!(AssetsError::from(err))),
         },
     };
 
@@ -160,7 +159,7 @@ pub async fn load_dir(path: PathBuf) -> Result<HashMap<u32, (AssetPath, Asset)>,
     Ok(assets)
 }
 
-pub async fn load_file(path: &Path) -> Result<Asset, IOError> {
+pub fn load_file(path: &Path) -> Result<Asset> {
     let mut file = File::open(path)?;
 
     let mut buffer = Vec::new();
@@ -180,19 +179,19 @@ pub async fn load_file(path: &Path) -> Result<Asset, IOError> {
             handle: image::Handle::from_bytes(buffer),
         }))
     } else {
-        Err(IOError::InvalidAsset)
+        Err(anyhow!(AssetsError::InvalidAsset))
     }
 }
 
-pub async fn copy_to_assets_dir(
+pub fn copy_to_assets_dir(
     assets_folder: Option<PathBuf>,
     path: PathBuf,
-) -> Result<(PathBuf, Asset), IOError> {
+) -> Result<(PathBuf, Asset)> {
     let Some(folder) = assets_folder.clone() else {
-        return Err(IOError::NoFolderLoaded);
+        return Err(anyhow!(AssetsError::NoFolderLoaded));
     };
 
-    match load_file(&path).await {
+    match load_file(&path) {
         Ok(asset) => {
             let file_name = path
                 .clone()
@@ -211,12 +210,9 @@ pub async fn copy_to_assets_dir(
     }
 }
 
-pub fn write_index(
-    index: &HashMap<u32, AssetPath>,
-    assets_folder: Option<PathBuf>,
-) -> Result<(), IOError> {
+pub fn write_index(index: &HashMap<u32, AssetPath>, assets_folder: Option<PathBuf>) -> Result<()> {
     let Some(assets_folder) = assets_folder else {
-        return Err(IOError::NoFolderLoaded);
+        return Err(anyhow!(AssetsError::NoFolderLoaded));
     };
 
     let parsed_data = ron::ser::to_string_pretty(index, PrettyConfig::new())?;
@@ -235,7 +231,7 @@ pub fn write_index(
 }
 
 #[derive(Error, Debug, Clone)]
-pub enum IOError {
+pub enum AssetsError {
     #[error("The dialog was closed.")]
     DialogClosed,
     #[error("IO error occurred: {0}")]
@@ -252,7 +248,7 @@ pub enum IOError {
     FormatError(ron::Error),
 }
 
-impl From<std::io::Error> for IOError {
+impl From<std::io::Error> for AssetsError {
     fn from(value: std::io::Error) -> Self {
         match value.raw_os_error() {
             Some(err) => Self::OSError(err),
@@ -261,13 +257,13 @@ impl From<std::io::Error> for IOError {
     }
 }
 
-impl From<ron::de::SpannedError> for IOError {
+impl From<ron::de::SpannedError> for AssetsError {
     fn from(value: ron::de::SpannedError) -> Self {
         Self::DeserializationFailed(value)
     }
 }
 
-impl From<ron::Error> for IOError {
+impl From<ron::Error> for AssetsError {
     fn from(value: ron::Error) -> Self {
         Self::FormatError(value)
     }
