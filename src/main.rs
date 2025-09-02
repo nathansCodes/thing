@@ -16,6 +16,7 @@ use iced::keyboard::key::Named;
 use ron::ser::PrettyConfig;
 use widgets::*;
 
+use anyhow::anyhow;
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::{horizontal_space, row, scrollable, slider, stack, vertical_space};
 use iced::{
@@ -28,6 +29,7 @@ use iced::{
 use iced::{Settings, Size, Subscription, Transformation, Vector, keyboard, window};
 use iced_aw::{menu, menu::Item, menu_bar};
 use serde::{Deserialize, Serialize};
+
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -36,7 +38,7 @@ use std::time::Duration;
 use crate::{
     assets::{AssetsData, AssetsMessage},
     graph::GraphData,
-    io::{IOError, pick_file, pick_folder},
+    io::{AssetsError, pick_file, pick_folder},
 };
 
 fn main() -> iced::Result {
@@ -68,6 +70,7 @@ fn main() -> iced::Result {
                     notifications: Vec::new(),
                     dnd_payload: None,
                     dialog: None,
+                    last_error: None,
                 },
                 Task::none(),
             )
@@ -101,6 +104,7 @@ struct State {
     notifications: Vec<Notification>,
     dnd_payload: Option<Draggable>,
     dialog: Option<Dialog<Message>>,
+    last_error: Option<anyhow::Error>,
 }
 
 #[derive(Default, PartialEq)]
@@ -119,17 +123,18 @@ enum Message {
     OpenLoadFolderDialog,
     ConfirmLoadPath(PathBuf),
     DataNotLoaded,
+    Load(PathBuf),
     LoadData(PathBuf),
     ParseData(String, PathBuf),
-    LoadDataFailed(IOError),
-    OpenFolderFailed(IOError),
+    LoadDataFailed,
+    OpenFolderFailed,
     OpenAddAssetDialog,
     AddExternalAsset(PathBuf),
     AddAsset(String, Asset),
-    AddAssetFailed(IOError),
+    AddAssetFailed,
     Save,
     Saved,
-    SaveFailed(std::io::ErrorKind),
+    SaveFailed,
     PaneClicked(pane_grid::Pane),
     PaneDragged(pane_grid::DragEvent),
     PaneResized(pane_grid::ResizeEvent),
@@ -366,15 +371,13 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.assets.set_folder(path.clone());
                 assets::update(&mut state.assets, AssetsMessage::LoadAssets(path.clone()))
                     .map(Message::AssetsMessage)
-                    .chain(Task::perform(
-                        io::load(path.clone()),
-                        move |res| match res {
-                            Ok(raw_data) => Message::ParseData(raw_data, path.clone()),
-                            Err(IOError::IO(ErrorKind::NotFound)) => Message::DataNotLoaded,
-                            Err(err) => Message::LoadDataFailed(err),
-                        },
-                    ))
             }
+            AssetsMessage::LoadCompleted(path, data) => assets::update(
+                &mut state.assets,
+                AssetsMessage::LoadCompleted(path.clone(), data),
+            )
+            .map(Message::AssetsMessage)
+            .chain(Task::done(Message::LoadData(path))),
             AssetsMessage::SetPayload(payload) => Task::done(Message::SetDragPayload(payload)),
             AssetsMessage::RenameAssetFailed(err, asset) => {
                 state.notifications.push(Notification::error(
@@ -394,16 +397,24 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::MenuButtonPressed => Task::none(),
-        Message::OpenLoadFolderDialog => {
-            Task::perform(pick_folder(), |path_maybe| match path_maybe {
-                Ok(path) if path.exists() && path.is_dir() => Message::ConfirmLoadPath(path),
-                Ok(path) if path.is_file() => {
-                    Message::OpenFolderFailed(IOError::IO(std::io::ErrorKind::NotADirectory))
-                }
-                Ok(_) => Message::OpenFolderFailed(IOError::IO(std::io::ErrorKind::NotFound)),
-                Err(err) => Message::OpenFolderFailed(err),
-            })
-        }
+        Message::OpenLoadFolderDialog => match pick_folder() {
+            Ok(path) if path.exists() && path.is_dir() => {
+                Task::done(Message::ConfirmLoadPath(path))
+            }
+            Ok(path) if path.is_file() => {
+                state.last_error =
+                    Some(anyhow!(AssetsError::IO(std::io::ErrorKind::NotADirectory)));
+                Task::done(Message::OpenFolderFailed)
+            }
+            Ok(_) => {
+                state.last_error = Some(anyhow!(AssetsError::IO(std::io::ErrorKind::NotFound)));
+                Task::done(Message::OpenFolderFailed)
+            }
+            Err(err) => {
+                state.last_error = Some(err);
+                Task::done(Message::OpenFolderFailed)
+            }
+        },
         Message::ConfirmLoadPath(path) => {
             let read_dir: Vec<_> = path.as_path().read_dir().unwrap().collect();
 
@@ -411,7 +422,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 path.as_ref()
                     .is_ok_and(|entry| entry.file_name() == "data.ron")
             }) {
-                return Task::done(Message::LoadData(path));
+                return Task::done(Message::Load(path));
             } else if read_dir.len()
                 - read_dir
                     .iter()
@@ -436,7 +447,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     vec![DialogOption::new(
                         dialog::Severity::Warn,
                         "Load Anyway",
-                        Message::LoadData(path),
+                        Message::Load(path),
                     )],
                 ))
             }
@@ -444,16 +455,30 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::DataNotLoaded => Task::none(),
-        Message::LoadData(path) => {
+        Message::Load(path) => {
             state.dialog = None;
 
             Task::done(Message::AssetsMessage(AssetsMessage::LoadAssets(path)))
         }
+        Message::LoadData(path) => Task::done(match io::load(path.clone()) {
+            Ok(raw_data) => Message::ParseData(raw_data, path.clone()),
+            Err(err) => {
+                let m = match err.downcast_ref::<AssetsError>() {
+                    Some(AssetsError::IO(ErrorKind::NotFound)) => Message::DataNotLoaded,
+                    Some(_err) => Message::LoadDataFailed,
+                    None => Message::DataNotLoaded,
+                };
+
+                state.last_error = Some(err);
+
+                m
+            }
+        }),
         Message::ParseData(raw_data, path) => {
             let data: Result<
                 GraphData<Node, RelativeAttachment<line_styles::AxisAligned>>,
-                IOError,
-            > = ron::from_str(&raw_data).map_err(IOError::from);
+                AssetsError,
+            > = ron::from_str(&raw_data).map_err(AssetsError::from);
 
             match data {
                 Ok(data) => {
@@ -468,19 +493,28 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
 
                     Task::none()
                 }
-                Err(err) => Task::done(Message::LoadDataFailed(err)),
+                Err(err) => {
+                    state.last_error = Some(anyhow!(err));
+                    Task::done(Message::LoadDataFailed)
+                }
             }
         }
-        Message::LoadDataFailed(err) => {
-            state.notifications.push(Notification::error(
-                "Failed to load data",
-                format!("Failed to load data: {err}",),
-            ));
+        Message::LoadDataFailed => {
+            if let Some(err) = &state.last_error {
+                state.notifications.push(Notification::error(
+                    "Failed to load data",
+                    format!("Failed to load data: {err}",),
+                ));
+            }
 
             Task::none()
         }
-        Message::OpenFolderFailed(err) => {
-            if let IOError::DialogClosed = err {
+        Message::OpenFolderFailed => {
+            let Some(err) = &state.last_error else {
+                return Task::none();
+            };
+
+            if let Some(AssetsError::DialogClosed) = err.downcast_ref::<AssetsError>() {
                 return Task::none();
             }
 
@@ -491,33 +525,41 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
 
             Task::none()
         }
-        Message::OpenAddAssetDialog => Task::perform(pick_file(), |path_maybe| match path_maybe {
-            Ok(path) => Message::AddExternalAsset(path),
-            Err(err) => Message::AddAssetFailed(err),
-        }),
+        Message::OpenAddAssetDialog => match pick_file() {
+            Ok(path) => Task::done(Message::AddExternalAsset(path)),
+            Err(err) => {
+                state.last_error = Some(err);
+                Task::done(Message::AddAssetFailed)
+            }
+        },
         Message::AddExternalAsset(path) => {
-            let closure = move |res: Result<(PathBuf, Asset), IOError>| match res {
+            let res = io::copy_to_assets_dir(state.assets.folder().cloned(), path.clone());
+
+            Task::done(match res {
                 Ok((path, asset)) => Message::AddAsset(
                     path.file_name().unwrap().to_string_lossy().to_string(),
                     asset,
                 ),
-                Err(err) => Message::AddAssetFailed(err),
-            };
-
-            Task::perform(
-                io::copy_to_assets_dir(state.assets.folder().cloned(), path.clone()),
-                closure,
-            )
+                Err(err) => {
+                    state.last_error = Some(err);
+                    Message::AddAssetFailed
+                }
+            })
         }
         Message::AddAsset(file_name, asset) => match state.assets.add(file_name, asset) {
             Ok(_) => Task::none(),
-            Err(err) => Task::done(Message::AddAssetFailed(err)),
+            Err(err) => {
+                state.last_error = Some(anyhow!(err));
+                Task::done(Message::AddAssetFailed)
+            }
         },
-        Message::AddAssetFailed(err) => {
-            state.notifications.push(Notification::error(
-                "Failed to add asset",
-                format!("Failed to add asset: {err:?}",),
-            ));
+        Message::AddAssetFailed => {
+            if let Some(err) = &state.last_error {
+                state.notifications.push(Notification::error(
+                    "Failed to add asset",
+                    format!("Failed to add asset: {err:?}",),
+                ));
+            }
 
             Task::none()
         }
@@ -525,10 +567,13 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             let parsed = ron::ser::to_string_pretty(&state.nodes, PrettyConfig::new()).unwrap();
 
             if let Some(folder) = &state.assets.folder() {
-                Task::perform(io::save(folder.join("data.ron"), parsed), |res| match res {
-                    Ok(()) => Message::Saved,
-                    Err(err) => Message::SaveFailed(err.kind()),
-                })
+                match io::save(folder.join("data.ron"), parsed) {
+                    Ok(()) => Task::done(Message::Saved),
+                    Err(err) => {
+                        state.last_error = Some(err);
+                        Task::done(Message::SaveFailed)
+                    }
+                }
             } else {
                 Task::none()
             }
@@ -543,14 +588,17 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             ));
             Task::none()
         }
-        Message::SaveFailed(err) => {
-            state.notifications.push(Notification::error(
-                "Failed to save data",
-                format!(
-                    "Failed to save to {}: {err}",
-                    state.assets.folder().unwrap().to_string_lossy()
-                ),
-            ));
+        Message::SaveFailed => {
+            if let Some(err) = &state.last_error {
+                state.notifications.push(Notification::error(
+                    "Failed to save data",
+                    format!(
+                        "Failed to save to {}: {err}",
+                        state.assets.folder().unwrap().to_string_lossy()
+                    ),
+                ));
+            }
+
             Task::none()
         }
         Message::PaneClicked(pane) => {
