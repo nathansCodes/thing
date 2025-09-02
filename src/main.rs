@@ -30,7 +30,6 @@ use iced::{Settings, Size, Subscription, Transformation, Vector, keyboard, windo
 use iced_aw::{menu, menu::Item, menu_bar};
 use serde::{Deserialize, Serialize};
 
-use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
@@ -122,7 +121,6 @@ enum Message {
     MenuButtonPressed,
     OpenLoadFolderDialog,
     ConfirmLoadPath(PathBuf),
-    DataNotLoaded,
     Load(PathBuf),
     LoadData(PathBuf),
     ParseData(String, PathBuf),
@@ -379,14 +377,13 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             .map(Message::AssetsMessage)
             .chain(Task::done(Message::LoadData(path))),
             AssetsMessage::SetPayload(payload) => Task::done(Message::SetDragPayload(payload)),
-            AssetsMessage::RenameAssetFailed(err, asset) => {
-                state.notifications.push(Notification::error(
-                    "Failed to rename asset",
-                    format!(
-                        "Failed to rename asset:\n  {:?};\ndue to error: {err}",
-                        &state.assets[asset]
-                    ),
-                ));
+            AssetsMessage::RenameAssetFailed(_) => {
+                if let Some(err) = state.assets.last_error() {
+                    state.notifications.push(Notification::error(
+                        "Failed to rename asset",
+                        format!("{err:#}"),
+                    ));
+                }
 
                 Task::none()
             }
@@ -402,12 +399,14 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 Task::done(Message::ConfirmLoadPath(path))
             }
             Ok(path) if path.is_file() => {
-                state.last_error =
-                    Some(anyhow!(AssetsError::IO(std::io::ErrorKind::NotADirectory)));
+                state.last_error = Some(anyhow!(std::io::Error::from(
+                    std::io::ErrorKind::NotADirectory
+                )));
                 Task::done(Message::OpenFolderFailed)
             }
             Ok(_) => {
-                state.last_error = Some(anyhow!(AssetsError::IO(std::io::ErrorKind::NotFound)));
+                state.last_error =
+                    Some(anyhow!(std::io::Error::from(std::io::ErrorKind::NotFound)));
                 Task::done(Message::OpenFolderFailed)
             }
             Err(err) => {
@@ -454,7 +453,6 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
 
             Task::none()
         }
-        Message::DataNotLoaded => Task::none(),
         Message::Load(path) => {
             state.dialog = None;
 
@@ -463,22 +461,13 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::LoadData(path) => Task::done(match io::load(path.clone()) {
             Ok(raw_data) => Message::ParseData(raw_data, path.clone()),
             Err(err) => {
-                let m = match err.downcast_ref::<AssetsError>() {
-                    Some(AssetsError::IO(ErrorKind::NotFound)) => Message::DataNotLoaded,
-                    Some(_err) => Message::LoadDataFailed,
-                    None => Message::DataNotLoaded,
-                };
-
                 state.last_error = Some(err);
 
-                m
+                Message::LoadDataFailed
             }
         }),
         Message::ParseData(raw_data, path) => {
-            let data: Result<
-                GraphData<Node, RelativeAttachment<line_styles::AxisAligned>>,
-                AssetsError,
-            > = ron::from_str(&raw_data).map_err(AssetsError::from);
+            let data = ron::from_str(&raw_data);
 
             match data {
                 Ok(data) => {
@@ -500,7 +489,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         }
         Message::LoadDataFailed => {
-            if let Some(err) = &state.last_error {
+            if let Some(err) = &state.last_error
+                && let Some(assets_err) = err.downcast_ref::<AssetsError>()
+                && *assets_err != AssetsError::DialogClosed
+            {
                 state.notifications.push(Notification::error(
                     "Failed to load data",
                     format!("Failed to load data: {err}",),

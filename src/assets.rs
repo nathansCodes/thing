@@ -8,6 +8,7 @@ pub use ui::{update, view};
 
 use std::{collections::HashMap, ops::Index, path::PathBuf, str::FromStr};
 
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
 use crate::io::AssetsError;
@@ -81,7 +82,7 @@ pub struct AssetsData {
     view_dropdown_open: bool,
     assets: HashMap<AssetPath, Asset>,
     index: HashMap<u32, AssetPath>,
-    error_state: Option<AssetsError>,
+    last_error: Option<anyhow::Error>,
     query: Option<String>,
     folder: Option<PathBuf>,
     renaming: Option<(AssetHandle, String)>,
@@ -119,7 +120,7 @@ impl AssetsData {
         &mut self,
         file_name: impl Into<String>,
         asset: impl Into<Asset>,
-    ) -> Result<AssetHandle, AssetsError> {
+    ) -> Result<AssetHandle> {
         let folder = self.folder.as_ref().ok_or(AssetsError::NoFolderLoaded)?;
 
         let asset: Asset = asset.into();
@@ -129,7 +130,8 @@ impl AssetsData {
         let path = folder.join(asset_path.to_string());
 
         if !std::fs::exists(&path).is_ok_and(|exists| exists) {
-            return Err(AssetsError::OSError(2));
+            return Err(anyhow!(std::io::Error::from_raw_os_error(2))
+                .context(format!("File {path:?} does not exist.")));
         }
 
         let ids: Vec<&u32> = self.index.keys().collect();
@@ -156,13 +158,17 @@ impl AssetsData {
     pub fn query_present(&self) -> bool {
         self.query.is_some()
     }
+
+    pub fn last_error(&self) -> Option<&anyhow::Error> {
+        self.last_error.as_ref()
+    }
 }
 
 #[derive(Clone, Debug)]
 pub enum AssetsMessage {
     LoadAssets(PathBuf),
     LoadCompleted(PathBuf, HashMap<u32, (AssetPath, Asset)>),
-    LoadFailed(AssetsError),
+    LoadFailed,
     OpenAsset(AssetHandle),
     SetPayload(Option<crate::Draggable>),
     QueryChanged(Option<String>),
@@ -170,5 +176,5 @@ pub enum AssetsMessage {
     ShowHideDropdown,
     SetRenameInput(Option<(AssetHandle, String)>),
     RenameAsset,
-    RenameAssetFailed(AssetsError, AssetHandle),
+    RenameAssetFailed(AssetHandle),
 }

@@ -8,7 +8,7 @@ use std::{
 
 use anyhow::{Result, anyhow};
 use file_type::FileType;
-use iced::{futures::io, widget::image};
+use iced::widget::image;
 use ron::ser::PrettyConfig;
 use thiserror::Error;
 
@@ -69,7 +69,7 @@ pub fn load_dir(path: PathBuf) -> Result<HashMap<u32, (AssetPath, Asset)>> {
         Ok(index_file) => index_file,
         Err(err) => match err.kind() {
             ErrorKind::NotFound => File::create_new(index_path)?,
-            _ => return Err(anyhow!(AssetsError::from(err))),
+            _ => return Err(anyhow!(err)),
         },
     };
 
@@ -230,41 +230,12 @@ pub fn write_index(index: &HashMap<u32, AssetPath>, assets_folder: Option<PathBu
     Ok(())
 }
 
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug, Clone, PartialEq)]
 pub enum AssetsError {
     #[error("The dialog was closed.")]
     DialogClosed,
-    #[error("IO error occurred: {0}")]
-    IO(io::ErrorKind),
-    #[error("OS error {0} occurred {err}", err = io::Error::from_raw_os_error(*.0).kind())]
-    OSError(i32),
-    #[error("Deserialization failed at {pos}: {err}", pos = .0.position, err = .0.code)]
-    DeserializationFailed(ron::de::SpannedError),
     #[error("File is not a valid asset.")]
     InvalidAsset,
     #[error("Can't complete operation without any folder being loaded.")]
     NoFolderLoaded,
-    #[error("")]
-    FormatError(ron::Error),
-}
-
-impl From<std::io::Error> for AssetsError {
-    fn from(value: std::io::Error) -> Self {
-        match value.raw_os_error() {
-            Some(err) => Self::OSError(err),
-            None => Self::IO(value.kind()),
-        }
-    }
-}
-
-impl From<ron::de::SpannedError> for AssetsError {
-    fn from(value: ron::de::SpannedError) -> Self {
-        Self::DeserializationFailed(value)
-    }
-}
-
-impl From<ron::Error> for AssetsError {
-    fn from(value: ron::Error) -> Self {
-        Self::FormatError(value)
-    }
 }
