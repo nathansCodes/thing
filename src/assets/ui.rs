@@ -1,5 +1,14 @@
 use std::io;
 
+use crate::{
+    assets::{
+        Asset, AssetHandle, AssetKind, AssetPath, AssetsData, AssetsMessage, Image, ViewMode,
+    },
+    io::{AssetsError, load_dir, write_index},
+    style,
+    widgets::{self, dnd::dnd_provider, dropdown, icons},
+};
+
 use iced::{
     Alignment, Element,
     Length::{Fill, Shrink},
@@ -11,14 +20,7 @@ use iced::{
 };
 use iced_aw::ContextMenu;
 
-use crate::{
-    assets::{
-        Asset, AssetHandle, AssetKind, AssetPath, AssetsData, AssetsMessage, Image, ViewMode,
-    },
-    io::{AssetsError, load_dir, write_index},
-    style,
-    widgets::{self, dnd::dnd_provider, dropdown, icons},
-};
+use anyhow::anyhow;
 
 pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMessage> {
     match message {
@@ -30,18 +32,24 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
             if !path.exists()
                 && let Err(err) = std::fs::create_dir(path.clone())
             {
-                return Task::done(AssetsMessage::LoadFailed(AssetsError::IO(err.kind())));
+                state.last_error = Some(anyhow!(err).context(format!("Couldn't create {path:?}")));
+                return Task::done(AssetsMessage::LoadFailed);
             }
 
             let message = if !path.is_dir() {
-                AssetsMessage::LoadFailed(AssetsError::IO(io::ErrorKind::AlreadyExists))
+                state.last_error = Some(
+                    anyhow!(io::Error::from(io::ErrorKind::AlreadyExists))
+                        .context(format!("Couldn't create {path:?}")),
+                );
+                AssetsMessage::LoadFailed
             } else {
                 match load_dir(path.clone()) {
                     Ok(files) => AssetsMessage::LoadCompleted(path, files),
                     Err(err) => {
-                        let err = err.downcast_ref::<AssetsError>().unwrap();
+                        state.last_error =
+                            Some(anyhow!(err).context(format!("Couldn't load {path:?}")));
 
-                        AssetsMessage::LoadFailed(err.clone())
+                        AssetsMessage::LoadFailed
                     }
                 }
             };
@@ -56,9 +64,11 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
 
             Task::none()
         }
-        AssetsMessage::LoadFailed(error) => {
-            println!("{error:?}");
-            state.error_state = Some(error);
+        AssetsMessage::LoadFailed => {
+            if let Some(err) = &state.last_error {
+                println!("{err:#}");
+            }
+
             Task::none()
         }
         AssetsMessage::OpenAsset(handle) => Task::done(AssetsMessage::OpenAsset(handle)),
@@ -94,13 +104,16 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
 
             let folder = state.folder.clone().unwrap();
 
-            if let Err(err) =
-                std::fs::rename(folder.clone() + old_path.clone(), folder + new_path.clone())
-            {
-                return Task::done(AssetsMessage::RenameAssetFailed(
-                    AssetsError::from(err),
-                    handle,
-                ));
+            let from = folder.clone() + old_path.clone();
+
+            let to = folder + new_path.clone();
+
+            let err_ctx = format!("Couldn't rename {from:?} to {to:?}");
+
+            if let Err(err) = std::fs::rename(from, to) {
+                state.last_error = Some(anyhow!(err).context(err_ctx));
+
+                return Task::done(AssetsMessage::RenameAssetFailed(handle));
             };
 
             let res = write_index(&state.index, state.folder.clone());
@@ -114,7 +127,9 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
                 }
                 Err(err) => {
                     if let Some(err) = err.downcast_ref::<AssetsError>() {
-                        return Task::done(AssetsMessage::RenameAssetFailed(err.clone(), handle));
+                        state.last_error = Some(anyhow!(err.clone()).context(err_ctx));
+
+                        return Task::done(AssetsMessage::RenameAssetFailed(handle));
                     }
                     Task::none()
                 }
