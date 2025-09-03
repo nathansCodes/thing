@@ -1,9 +1,11 @@
 mod asset_path;
+mod character;
 pub mod image;
 mod ui;
 
 pub use asset_path::AssetPath;
-pub use image::Image;
+pub use character::Character;
+pub use image::{Image, default_image};
 pub use ui::{update, view};
 
 use std::{collections::HashMap, ops::Index, path::PathBuf, str::FromStr};
@@ -16,12 +18,14 @@ use crate::io::AssetsError;
 #[derive(Debug, Clone)]
 pub enum Asset {
     Image(Image),
+    Character(Character),
 }
 
 impl Asset {
-    pub fn folder(&self) -> String {
+    pub fn folder(&self) -> &'static str {
         match self {
-            Self::Image(_) => "images".to_string(),
+            Self::Image(_) => "images",
+            Self::Character(_) => "characters",
         }
     }
 
@@ -29,6 +33,7 @@ impl Asset {
     pub fn kind(&self) -> AssetKind {
         match self {
             Self::Image(_) => AssetKind::Image,
+            Self::Character(_) => AssetKind::Character,
         }
     }
 }
@@ -40,12 +45,14 @@ pub struct AssetHandle(u32);
 pub enum AssetKind {
     #[default]
     Image,
+    Character,
 }
 
 impl AssetKind {
     pub fn folder(&self) -> &'static str {
         match self {
             Self::Image => "images",
+            Self::Character => "characters",
         }
     }
 
@@ -101,6 +108,51 @@ impl AssetsData {
         self.index
             .get(&handle.0)
             .and_then(|asset_path| self.assets.get(asset_path))
+    }
+
+    pub fn get_mut(&mut self, handle: AssetHandle) -> Option<&mut Asset> {
+        self.index
+            .get(&handle.0)
+            .and_then(|asset_path| self.assets.get_mut(asset_path))
+    }
+
+    pub fn get_direct<'assets: 'asset, 'asset, A>(
+        &'assets self,
+        handle: AssetHandle,
+    ) -> Option<&'asset A>
+    where
+        &'asset A: TryFrom<&'asset Asset>,
+    {
+        self.index.get(&handle.0).and_then(|asset_path| {
+            self.assets
+                .get(asset_path)
+                .and_then(|asset| <&A>::try_from(asset).ok())
+        })
+    }
+
+    pub fn get_direct_mut<'assets: 'asset, 'asset, A>(
+        &'assets mut self,
+        handle: AssetHandle,
+    ) -> Option<&'asset mut A>
+    where
+        &'asset mut A: TryFrom<&'asset mut Asset>,
+    {
+        self.index.get(&handle.0).and_then(|asset_path| {
+            self.assets
+                .get_mut(asset_path)
+                .and_then(|asset| <&mut A>::try_from(asset).ok())
+        })
+    }
+
+    pub fn is<'assets: 'asset, 'asset, A>(&'assets self, handle: AssetHandle) -> bool
+    where
+        &'asset A: TryFrom<&'asset Asset> + 'asset,
+    {
+        self.index.get(&handle.0).is_some_and(|asset_path| {
+            self.assets
+                .get(asset_path)
+                .is_some_and(|asset| <&A>::try_from(asset).is_ok())
+        })
     }
 
     #[allow(unused)]

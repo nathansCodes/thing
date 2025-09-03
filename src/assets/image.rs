@@ -9,13 +9,19 @@ pub struct Image {
     pub handle: image::Handle,
 }
 
-impl TryFrom<&Asset> for Image {
+impl Image {
+    pub fn new(handle: image::Handle) -> Self {
+        Self { handle }
+    }
+}
+
+impl<'a> TryFrom<&'a Asset> for &'a Image {
     type Error = ();
 
     #[allow(unreachable_patterns)]
-    fn try_from(asset: &Asset) -> Result<Self, Self::Error> {
+    fn try_from(asset: &'a Asset) -> Result<Self, Self::Error> {
         match asset {
-            Asset::Image(image) => Ok(image.clone()),
+            Asset::Image(image) => Ok(image),
             _ => Err(()),
         }
     }

@@ -5,7 +5,7 @@ mod positioning_schemes;
 mod style;
 mod widgets;
 
-use crate::assets::{Asset, AssetHandle, AssetKind};
+use crate::assets::{Asset, AssetHandle, AssetKind, Character};
 use crate::notification::Notification;
 use crate::widgets::dialog::{Dialog, DialogOption};
 use crate::widgets::dnd::{dnd_indicator, dnd_receiver};
@@ -82,14 +82,8 @@ enum Draggable {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct Character {
-    name: String,
-    img: AssetHandle,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
 enum Node {
-    Character(Character),
+    Character(AssetHandle),
     Family,
 }
 
@@ -117,7 +111,7 @@ enum Pane {
 #[derive(Debug, Clone)]
 enum Message {
     AssetsMessage(AssetsMessage),
-    AddCharacter(Character, Point),
+    AddCharacter(AssetHandle, Point),
     MenuButtonPressed,
     OpenLoadFolderDialog,
     ConfirmLoadPath(PathBuf),
@@ -145,6 +139,7 @@ enum Message {
     DropAssetOnGraph(AssetHandle, Point),
     CloseDialog,
     EscapePressed,
+    NotifyError,
 }
 
 fn view(state: &State) -> Element<'_, Message> {
@@ -255,11 +250,10 @@ fn view(state: &State) -> Element<'_, Message> {
 
                 Element::from(dnd_receiver(
                     |payload, relative_cursor_pos| match payload {
-                        Draggable::Asset(handle) => match state.assets[handle] {
-                            Asset::Image(_) => {
-                                Some(Message::DropAssetOnGraph(handle, relative_cursor_pos))
-                            }
-                        },
+                        Draggable::Asset(handle) => state
+                            .assets
+                            .is::<assets::Image>(handle)
+                            .then_some(Message::DropAssetOnGraph(handle, relative_cursor_pos)),
                     },
                     state.dnd_payload.clone(),
                     stack![
@@ -318,19 +312,34 @@ fn view(state: &State) -> Element<'_, Message> {
         )
     ];
 
+    let default_img = assets::Image::new(assets::default_image());
+
     widgets::dialog(
         &state.dialog,
         column![
             menu_bar,
             stack![
                 dnd_indicator(
-                    state.dnd_payload.clone().map(|draggable| match draggable {
-                        Draggable::Asset(handle) => match &state.assets[handle] {
-                            Asset::Image(img) =>
-                                container(image(img.handle.clone()).width(50.0).opacity(0.5))
-                                    .width(50.0)
-                                    .into(),
-                        },
+                    state.dnd_payload.clone().map(|draggable| {
+                        let img = match draggable {
+                            Draggable::Asset(handle) => match state
+                                .assets
+                                .get(handle)
+                                .unwrap_or(&Asset::Image(default_img.clone()))
+                            {
+                                Asset::Image(img) => img.handle.clone(),
+                                Asset::Character(character) => state
+                                    .assets
+                                    .get_direct::<assets::Image>(character.img)
+                                    .unwrap_or(&default_img)
+                                    .handle
+                                    .clone(),
+                            },
+                        };
+
+                        container(image(img).width(50.0).opacity(0.5))
+                            .width(50.0)
+                            .into()
                     }),
                     container(grid)
                 ),
@@ -348,19 +357,35 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     return Task::none();
                 };
                 match asset {
-                    Asset::Image(_) => Task::done(Message::AddCharacter(
-                        Character {
-                            name: state
-                                .assets
-                                .path(handle)
-                                .unwrap()
-                                .name()
-                                .split('.')
-                                .next()
-                                .unwrap()
-                                .to_string(),
-                            img: handle,
-                        },
+                    Asset::Image(_) => {
+                        let name = state
+                            .assets
+                            .path(handle)
+                            .unwrap()
+                            .name()
+                            .split('.')
+                            .next()
+                            .unwrap()
+                            .to_string();
+
+                        let result = state
+                            .assets
+                            .add(name.clone() + ".chara.ron", Character { name, img: handle });
+
+                        match result {
+                            Ok(handle) => Task::done(Message::AddCharacter(
+                                handle,
+                                Point::ORIGIN + state.graph_position,
+                            )),
+                            Err(err) => {
+                                state.last_error = Some(err);
+
+                                Task::done(Message::NotifyError)
+                            }
+                        }
+                    }
+                    Asset::Character(_) => Task::done(Message::AddCharacter(
+                        handle,
                         Point::ORIGIN + state.graph_position,
                     )),
                 }
@@ -765,19 +790,36 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::DropAssetOnGraph(handle, relative_cursor_pos) => {
             state.dnd_payload = None;
             match &state.assets[handle] {
-                Asset::Image(_) => Task::done(Message::AddCharacter(
-                    Character {
-                        name: state
-                            .assets
-                            .path(handle)
-                            .unwrap()
-                            .name()
-                            .split('.')
-                            .next()
-                            .unwrap_or("name")
-                            .to_string(),
-                        img: handle,
-                    },
+                Asset::Image(_) => {
+                    let name = state
+                        .assets
+                        .path(handle)
+                        .unwrap()
+                        .name()
+                        .split('.')
+                        .next()
+                        .unwrap()
+                        .to_string();
+
+                    let result = state
+                        .assets
+                        .add(name.clone() + ".chara.ron", Character { name, img: handle });
+
+                    match result {
+                        Ok(handle) => Task::done(Message::AddCharacter(
+                            handle,
+                            relative_cursor_pos * Transformation::scale(1.0 / state.graph_zoom)
+                                + state.graph_position,
+                        )),
+                        Err(err) => {
+                            state.last_error = Some(err);
+
+                            Task::done(Message::NotifyError)
+                        }
+                    }
+                }
+                Asset::Character(_) => Task::done(Message::AddCharacter(
+                    handle,
                     relative_cursor_pos * Transformation::scale(1.0 / state.graph_zoom)
                         + state.graph_position,
                 )),
@@ -795,6 +837,16 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             } else {
                 Task::none()
             }
+        }
+        Message::NotifyError => {
+            if let Some(err) = &state.last_error {
+                state.notifications.push(Notification::error(
+                    "Failed to add character",
+                    format!("{err:#}"),
+                ));
+            }
+
+            Task::none()
         }
     }
 }
