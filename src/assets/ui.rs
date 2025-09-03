@@ -1,9 +1,7 @@
 use std::io;
 
 use crate::{
-    assets::{
-        Asset, AssetHandle, AssetKind, AssetPath, AssetsData, AssetsMessage, Image, ViewMode,
-    },
+    assets::{Asset, AssetHandle, AssetPath, AssetsData, AssetsMessage, Image, ViewMode},
     io::{AssetsError, load_dir, write_index},
     style,
     widgets::{self, dnd::dnd_provider, dropdown, icons},
@@ -198,52 +196,49 @@ fn image_item<'a>(
 }
 
 pub fn view(state: &AssetsData) -> Element<'_, AssetsMessage> {
-    let content = match state.view {
-        AssetKind::Image => {
-            let mut images: Vec<_> = state
-                .index
-                .iter()
-                .filter_map(|(id, asset_path)| {
-                    state.assets.get(asset_path).and_then(|asset| {
-                        asset_path
-                            .to_string()
-                            .to_lowercase()
-                            .contains(&state.query().to_lowercase())
-                            .then_some(asset_path)
-                            // WARNING: change to .and_then when adding new types of assets
-                            .map(|path| match asset {
-                                Asset::Image(img) => (*id, path, img),
-                            })
-                    })
+    let mut images: Vec<_> = state
+        .index
+        .iter()
+        .filter_map(|(id, asset_path)| {
+            state.assets.get(asset_path).and_then(|asset| {
+                let path_str = asset_path.to_string().to_lowercase();
+
+                (path_str.starts_with(state.view.folder())
+                    && path_str.contains(&state.query().to_lowercase()))
+                .then_some(())
+                .and_then(|_| match asset {
+                    Asset::Image(img) => Some(img),
+                    Asset::Character(character) => state.get_direct::<Image>(character.img),
                 })
-                .collect();
+                .map(|img| (*id, asset_path, img))
+            })
+        })
+        .collect();
 
-            images.sort_by(|a, b| a.0.cmp(&b.0));
+    images.sort_by(|a, b| a.1.to_string().cmp(&b.1.to_string()));
 
-            let images = images.into_iter().enumerate().map(|(i, (id, path, img))| {
-                let handle = AssetHandle(id);
-                let img_element = image_item(i, handle, path, state, img);
+    let images = images.into_iter().enumerate().map(|(i, (id, path, img))| {
+        let handle = AssetHandle(id);
+        let img_element = image_item(i, handle, path, state, img);
 
-                ContextMenu::new(img_element, move || {
-                    container(column![widgets::menu_button(
-                        "Rename",
-                        AssetsMessage::SetRenameInput(Some((handle, path.to_string())))
-                    )])
-                    .padding(4)
-                    .style(style::dropdown)
-                    .into()
-                })
-                .into()
-            });
+        ContextMenu::new(img_element, move || {
+            container(column![widgets::menu_button(
+                "Rename",
+                AssetsMessage::SetRenameInput(Some((handle, path.to_string())))
+            )])
+            .padding(4)
+            .style(style::dropdown)
+            .into()
+        })
+        .into()
+    });
 
-            let layout = match state.view_mode {
-                ViewMode::Thumbnails => Element::from(row(images).spacing(5).width(Fill).wrap()),
-                ViewMode::List => Element::from(column(images).spacing(2).width(Fill)),
-            };
-
-            scrollable(layout).style(style::scrollable)
-        }
+    let layout = match state.view_mode {
+        ViewMode::Thumbnails => Element::from(row(images).spacing(5).width(Fill).wrap()),
+        ViewMode::List => Element::from(column(images).spacing(2).width(Fill)),
     };
+
+    let content = scrollable(layout).style(style::scrollable);
 
     let top_row = responsive(move |size| {
         let dropdown = dropdown(

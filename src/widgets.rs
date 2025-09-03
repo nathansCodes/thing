@@ -20,7 +20,7 @@ use iced_aw::DropDown;
 
 use crate::{
     Message, Node,
-    assets::{AssetsData, Image, image::default_image},
+    assets::{AssetsData, Character, Image, image::default_image},
     notification::Notification,
     style,
     widgets::graph::{Graph, GraphData, GraphNode},
@@ -181,34 +181,38 @@ pub fn node<'a>(
     assets: &'a AssetsData,
 ) -> Box<dyn for<'any> Fn(&'any GraphNode<Node>) -> Element<'any, Message> + 'a> {
     Box::new(|node| match node.data() {
-        Node::Character(chara) => container(
-            column![
-                image(
-                    assets
-                        .get(chara.img)
-                        .and_then(|asset| Image::try_from(asset).ok())
-                        .map(|img| img.handle)
-                        .unwrap_or(default_image())
-                )
-                .width(Fill)
-                .height(Fill)
-                .filter_method(image::FilterMethod::Nearest),
-                opaque(
-                    column![
-                        text(&chara.name).center().width(Fill),
-                        base_button("ahkdlfjs").on_press(Message::CharacterButtonPressed)
-                    ]
+        Node::Character(handle) => {
+            let Some(chara) = assets.get_direct::<Character>(*handle) else {
+                return text("Couldn't load character.").into();
+            };
+            container(
+                column![
+                    image(
+                        assets
+                            .get_direct::<Image>(chara.img)
+                            .map(|img| img.handle.clone())
+                            .unwrap_or(default_image())
+                    )
                     .width(Fill)
-                    .spacing(5.0)
-                ),
-            ]
-            .spacing(5.0),
-        )
-        .width(150.0)
-        .height(150.0)
-        .padding(5.0)
-        .style(style::node(node.selected()))
-        .into(),
+                    .height(Fill)
+                    .filter_method(image::FilterMethod::Nearest),
+                    opaque(
+                        column![
+                            text(chara.name.clone()).center().width(Fill),
+                            base_button("ahkdlfjs").on_press(Message::CharacterButtonPressed)
+                        ]
+                        .width(Fill)
+                        .spacing(5.0)
+                    ),
+                ]
+                .spacing(5.0),
+            )
+            .width(150.0)
+            .height(150.0)
+            .padding(5.0)
+            .style(style::node(node.selected()))
+            .into()
+        }
         Node::Family => container("")
             .width(10.0)
             .height(10.0)
