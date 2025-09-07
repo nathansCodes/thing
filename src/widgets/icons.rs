@@ -59,3 +59,15 @@ pub const UP: char = '\u{E808}';
 pub fn up<'a>() -> Text<'a, iced::Theme, iced::Renderer> {
     icon(UP)
 }
+
+pub const IMAGE: char = '\u{E809}';
+
+pub fn image<'a>() -> Text<'a, iced::Theme, iced::Renderer> {
+    icon(IMAGE)
+}
+
+pub const USER: char = '\u{E809}';
+
+pub fn user<'a>() -> Text<'a, iced::Theme, iced::Renderer> {
+    icon(USER)
+}

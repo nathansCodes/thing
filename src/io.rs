@@ -150,11 +150,25 @@ pub fn load_dir(path: PathBuf) -> Result<HashMap<u32, (AssetPath, Asset)>> {
                         }),
                     ),
                 ))
+            } else if media_types.iter().any(|t| t == &"text/plain") {
+                ron::de::from_bytes(&buffer)
+                    .map(|chara| {
+                        (
+                            id,
+                            (
+                                AssetPath::new(assets::AssetKind::Character, file_name.clone()),
+                                Asset::Character(chara),
+                            ),
+                        )
+                    })
+                    .ok()
             } else {
                 None
             }
         })
         .collect();
+
+    println!("{assets:#?}");
 
     Ok(assets)
 }

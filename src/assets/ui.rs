@@ -1,7 +1,7 @@
 use std::io;
 
 use crate::{
-    assets::{Asset, AssetHandle, AssetPath, AssetsData, AssetsMessage, Image, ViewMode},
+    assets::{Asset, AssetHandle, AssetKind, AssetPath, AssetsData, AssetsMessage, Image, Mode},
     io::{AssetsError, load_dir, write_index},
     style,
     widgets::{self, dnd::dnd_provider, dropdown, icons},
@@ -44,6 +44,7 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
                 match load_dir(path.clone()) {
                     Ok(files) => AssetsMessage::LoadCompleted(path, files),
                     Err(err) => {
+                        println!("{err}");
                         state.last_error =
                             Some(anyhow!(err).context(format!("Couldn't load {path:?}")));
 
@@ -75,11 +76,19 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
             state.query = text;
             Task::none()
         }
-        AssetsMessage::ViewChanged(view) => {
-            state.view_mode = view;
+        AssetsMessage::ModeChanged(mode) => {
+            state.mode = mode;
             Task::none()
         }
-        AssetsMessage::ShowHideDropdown => {
+        AssetsMessage::ViewChanged(view) => {
+            state.view = view;
+            Task::none()
+        }
+        AssetsMessage::ShowHideModeDropdown => {
+            state.mode_dropdown_open = !state.mode_dropdown_open;
+            Task::none()
+        }
+        AssetsMessage::ShowHideViewDropdown => {
             state.view_dropdown_open = !state.view_dropdown_open;
             Task::none()
         }
@@ -152,47 +161,45 @@ fn image_item<'a>(
 
     let file_name = path.name();
 
-    dnd_provider(
-        AssetsMessage::SetPayload,
-        crate::Draggable::Asset(handle),
-        match state.view_mode {
-            ViewMode::Thumbnails => button(
-                column![
-                    widget::image(&img.handle)
-                        .height(100.0)
-                        .width(100.0)
-                        .filter_method(widget::image::FilterMethod::Nearest),
-                    rename_input
-                        .map(|ri| Element::from(ri.width(100.0).align_x(Alignment::Center)))
-                        .unwrap_or(text(file_name).width(100.0).center().into())
-                ]
-                .spacing(5.0)
-                .padding(5.0),
-            )
-            .padding(0)
-            .style(style::list_item(false))
-            .on_press(AssetsMessage::OpenAsset(handle)),
-            ViewMode::List => button(
-                row![
-                    widget::image(&img.handle)
-                        .height(30)
-                        .width(30)
-                        .filter_method(widget::image::FilterMethod::Nearest),
-                    rename_input
-                        .map(Element::from)
-                        .unwrap_or(text(file_name).into())
-                ]
-                .width(Fill)
-                .height(40)
-                .spacing(10)
-                .padding(5)
-                .align_y(Alignment::Center),
-            )
-            .on_press(AssetsMessage::OpenAsset(handle))
-            .padding(0)
-            .style(style::list_item(i % 2 == 0)),
-        },
-    )
+    match state.mode {
+        Mode::Thumbnails => button(
+            column![
+                widget::image(&img.handle)
+                    .height(100.0)
+                    .width(100.0)
+                    .filter_method(widget::image::FilterMethod::Nearest),
+                rename_input
+                    .map(|ri| Element::from(ri.width(100.0).align_x(Alignment::Center)))
+                    .unwrap_or(text(file_name).width(100.0).center().into())
+            ]
+            .spacing(5.0)
+            .padding(5.0),
+        )
+        .padding(0)
+        .style(style::list_item(false))
+        .on_press(AssetsMessage::OpenAsset(handle))
+        .into(),
+        Mode::List => button(
+            row![
+                widget::image(&img.handle)
+                    .height(30)
+                    .width(30)
+                    .filter_method(widget::image::FilterMethod::Nearest),
+                rename_input
+                    .map(Element::from)
+                    .unwrap_or(text(file_name).into())
+            ]
+            .width(Fill)
+            .height(40)
+            .spacing(10)
+            .padding(5)
+            .align_y(Alignment::Center),
+        )
+        .on_press(AssetsMessage::OpenAsset(handle))
+        .padding(0)
+        .style(style::list_item(i % 2 == 0))
+        .into(),
+    }
 }
 
 pub fn view(state: &AssetsData) -> Element<'_, AssetsMessage> {
@@ -219,7 +226,11 @@ pub fn view(state: &AssetsData) -> Element<'_, AssetsMessage> {
 
     let images = images.into_iter().enumerate().map(|(i, (id, path, img))| {
         let handle = AssetHandle(id);
-        let img_element = image_item(i, handle, path, state, img);
+        let img_element = dnd_provider(
+            AssetsMessage::SetPayload,
+            crate::Draggable::Asset(handle),
+            image_item(i, handle, path, state, img),
+        );
 
         ContextMenu::new(img_element, move || {
             container(column![widgets::menu_button(
@@ -233,31 +244,49 @@ pub fn view(state: &AssetsData) -> Element<'_, AssetsMessage> {
         .into()
     });
 
-    let layout = match state.view_mode {
-        ViewMode::Thumbnails => Element::from(row(images).spacing(5).width(Fill).wrap()),
-        ViewMode::List => Element::from(column(images).spacing(2).width(Fill)),
+    let layout = match state.mode {
+        Mode::Thumbnails => Element::from(row(images).spacing(5).width(Fill).wrap()),
+        Mode::List => Element::from(column(images).spacing(2).width(Fill)),
     };
 
     let content = scrollable(layout).style(style::scrollable);
 
     let top_row = responsive(move |size| {
-        let dropdown = dropdown(
-            state.view_dropdown_open,
-            AssetsMessage::ShowHideDropdown,
-            match state.view_mode {
-                ViewMode::Thumbnails => icons::thumbnails(),
-                ViewMode::List => icons::list(),
+        let mode_dropdown = dropdown(
+            state.mode_dropdown_open,
+            AssetsMessage::ShowHideModeDropdown,
+            match state.mode {
+                Mode::Thumbnails => icons::thumbnails(),
+                Mode::List => icons::list(),
             },
             [
                 (
                     icons::THUMBNAILS,
                     "Thumbnails",
-                    AssetsMessage::ViewChanged(ViewMode::Thumbnails),
+                    AssetsMessage::ModeChanged(Mode::Thumbnails),
+                ),
+                (icons::LIST, "List", AssetsMessage::ModeChanged(Mode::List)),
+            ]
+            .into_iter(),
+        );
+
+        let view_dropdown = dropdown(
+            state.view_dropdown_open,
+            AssetsMessage::ShowHideViewDropdown,
+            match state.view {
+                AssetKind::Image => icons::image(),
+                AssetKind::Character => icons::user(),
+            },
+            [
+                (
+                    icons::IMAGE,
+                    "Images",
+                    AssetsMessage::ViewChanged(AssetKind::Image),
                 ),
                 (
-                    icons::LIST,
-                    "List",
-                    AssetsMessage::ViewChanged(ViewMode::List),
+                    icons::USER,
+                    "Characters",
+                    AssetsMessage::ViewChanged(AssetKind::Character),
                 ),
             ]
             .into_iter(),
@@ -268,7 +297,7 @@ pub fn view(state: &AssetsData) -> Element<'_, AssetsMessage> {
             .on_press(AssetsMessage::QueryChanged(Some("".to_string())))
             .style(style::menu_button);
 
-        let top_right_row = row![dropdown].spacing(4.0);
+        let top_right_row = row![view_dropdown, mode_dropdown].spacing(4.0);
 
         if let Some(query) = &state.query {
             let search_bar = text_input("Search...", query)

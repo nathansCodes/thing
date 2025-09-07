@@ -252,7 +252,7 @@ fn view(state: &State) -> Element<'_, Message> {
                     |payload, relative_cursor_pos| match payload {
                         Draggable::Asset(handle) => state
                             .assets
-                            .is::<assets::Image>(handle)
+                            .is::<assets::Character>(handle)
                             .then_some(Message::DropAssetOnGraph(handle, relative_cursor_pos)),
                     },
                     state.dnd_payload.clone(),
@@ -496,6 +496,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
 
             match data {
                 Ok(data) => {
+                    println!("{data:#?}");
                     state.nodes = data;
 
                     state.notifications.push(Notification::info(
@@ -508,6 +509,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     Task::none()
                 }
                 Err(err) => {
+                    println!("{err}");
                     state.last_error = Some(anyhow!(err));
                     Task::done(Message::LoadDataFailed)
                 }
@@ -783,41 +785,16 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::SetDragPayload(draggable) => {
             if !(state.dnd_payload.is_some() && draggable.is_some()) {
+                println!("dragging {:?}", draggable);
                 state.dnd_payload = draggable;
             }
             Task::none()
         }
         Message::DropAssetOnGraph(handle, relative_cursor_pos) => {
+            println!("dropping {handle:?}");
             state.dnd_payload = None;
             match &state.assets[handle] {
-                Asset::Image(_) => {
-                    let name = state
-                        .assets
-                        .path(handle)
-                        .unwrap()
-                        .name()
-                        .split('.')
-                        .next()
-                        .unwrap()
-                        .to_string();
-
-                    let result = state
-                        .assets
-                        .add(name.clone() + ".chara.ron", Character { name, img: handle });
-
-                    match result {
-                        Ok(handle) => Task::done(Message::AddCharacter(
-                            handle,
-                            relative_cursor_pos * Transformation::scale(1.0 / state.graph_zoom)
-                                + state.graph_position,
-                        )),
-                        Err(err) => {
-                            state.last_error = Some(err);
-
-                            Task::done(Message::NotifyError)
-                        }
-                    }
-                }
+                Asset::Image(_) => Task::none(),
                 Asset::Character(_) => Task::done(Message::AddCharacter(
                     handle,
                     relative_cursor_pos * Transformation::scale(1.0 / state.graph_zoom)

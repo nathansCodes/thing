@@ -60,7 +60,7 @@ impl AssetKind {
     // tried forcing this by also making use of a match but I can't because of temporary value
     // shenanigans
     pub fn all() -> &'static [Self] {
-        &[Self::Image]
+        &[Self::Image, Self::Character]
     }
 }
 
@@ -70,13 +70,14 @@ impl FromStr for AssetKind {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "images" | "image" => Ok(Self::Image),
+            "character" | "characters" => Ok(Self::Character),
             _ => Err(()),
         }
     }
 }
 
 #[derive(Default, Debug, Clone, Copy)]
-pub enum ViewMode {
+pub enum Mode {
     #[default]
     Thumbnails,
     List,
@@ -85,14 +86,15 @@ pub enum ViewMode {
 #[derive(Default)]
 pub struct AssetsData {
     view: AssetKind,
-    view_mode: ViewMode,
-    view_dropdown_open: bool,
+    mode: Mode,
+    mode_dropdown_open: bool,
     assets: HashMap<AssetPath, Asset>,
     index: HashMap<u32, AssetPath>,
     last_error: Option<anyhow::Error>,
     query: Option<String>,
     folder: Option<PathBuf>,
     renaming: Option<(AssetHandle, String)>,
+    view_dropdown_open: bool,
 }
 
 impl Index<AssetHandle> for AssetsData {
@@ -224,9 +226,11 @@ pub enum AssetsMessage {
     OpenAsset(AssetHandle),
     SetPayload(Option<crate::Draggable>),
     QueryChanged(Option<String>),
-    ViewChanged(ViewMode),
-    ShowHideDropdown,
+    ModeChanged(Mode),
+    ViewChanged(AssetKind),
+    ShowHideModeDropdown,
     SetRenameInput(Option<(AssetHandle, String)>),
     RenameAsset,
     RenameAssetFailed(AssetHandle),
+    ShowHideViewDropdown,
 }
