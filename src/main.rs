@@ -592,18 +592,40 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::Save => {
-            let parsed = ron::ser::to_string_pretty(&state.nodes, PrettyConfig::new()).unwrap();
+            let Some(folder) = state.assets.folder() else {
+                return Task::none();
+            };
 
-            if let Some(folder) = state.assets.folder() {
-                match io::save(folder, parsed) {
-                    Ok(()) => Task::done(Message::Saved),
-                    Err(err) => {
-                        state.last_error = Some(err);
-                        Task::done(Message::SaveFailed)
+            match state.assets.write_assets() {
+                Ok(failed) => {
+                    if !failed.is_empty() {
+                        for (_, err) in failed {
+                            state.notifications.push(Notification::error(
+                                "Failed to save asset.",
+                                err.to_string(),
+                            ));
+                        }
+
+                        state.last_error = None;
+                        return Task::done(Message::SaveFailed);
+                    }
+
+                    let parsed =
+                        ron::ser::to_string_pretty(&state.nodes, PrettyConfig::new()).unwrap();
+
+                    match io::save(folder, parsed) {
+                        Ok(()) => Task::done(Message::Saved),
+                        Err(err) => {
+                            state.last_error = Some(err);
+                            Task::done(Message::SaveFailed)
+                        }
                     }
                 }
-            } else {
-                Task::none()
+                Err(err) => {
+                    state.last_error = Some(err);
+
+                    Task::done(Message::SaveFailed)
+                }
             }
         }
         Message::Saved => {
@@ -617,15 +639,17 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::SaveFailed => {
-            if let Some(err) = &state.last_error {
-                state.notifications.push(Notification::error(
-                    "Failed to save data",
-                    format!(
-                        "Failed to save to {}: {err}",
-                        state.assets.folder().unwrap().to_string_lossy()
-                    ),
-                ));
-            }
+            state.notifications.push(Notification::error(
+                "Failed to save data",
+                format!(
+                    "Failed to save to {}: {}",
+                    state.assets.folder().unwrap().to_string_lossy(),
+                    state
+                        .last_error
+                        .as_ref()
+                        .map_or(String::new(), |err| err.to_string())
+                ),
+            ));
 
             Task::none()
         }

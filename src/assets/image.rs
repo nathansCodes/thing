@@ -5,9 +5,7 @@ use iced::{
     widget::image as iced_image,
 };
 
-use crate::assets::Asset;
-
-use serde::ser::{Serialize, Serializer};
+use crate::assets::{AsBytes, Asset};
 
 const DEFAULT_IMAGE: &[u8] = include_bytes!("../../assets/default.png").as_slice();
 
@@ -23,17 +21,14 @@ impl Image {
     }
 }
 
-impl Serialize for Image {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+impl AsBytes for Image {
+    fn as_bytes(&self) -> anyhow::Result<Vec<u8>> {
         let mut bytes = Cursor::new(Vec::new());
 
         match &self.handle {
             iced_image::Handle::Path(..) => (),
             iced_image::Handle::Bytes(_, img_bytes) => {
-                let _ = bytes.write_all(img_bytes);
+                bytes.write_all(img_bytes)?;
             }
             iced_image::Handle::Rgba {
                 id: _,
@@ -42,12 +37,12 @@ impl Serialize for Image {
                 pixels,
             } => {
                 if let Some(img) = RgbaImage::from_raw(*width, *height, pixels.to_vec()) {
-                    let _ = img.write_to(&mut bytes, self.format);
+                    img.write_to(&mut bytes, self.format)?;
                 }
             }
         };
 
-        serializer.serialize_bytes(bytes.into_inner().as_slice())
+        Ok(bytes.into_inner())
     }
 }
 

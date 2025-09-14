@@ -1,6 +1,5 @@
 use std::{collections::HashMap, io};
 
-use super::io::AssetsError;
 use crate::{
     assets::{
         Asset, AssetHandle, AssetKind, AssetPath, AssetsData, AssetsMessage, Image, Mode,

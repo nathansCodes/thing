@@ -1,4 +1,4 @@
-use crate::assets::{Asset, AssetKind, AssetPath, AssetsData};
+use crate::assets::{AsBytes, Asset, AssetKind, AssetPath, AssetsData};
 
 use anyhow::{Result, anyhow};
 use file_type::FileType;
@@ -55,6 +55,39 @@ impl AssetsData {
         index_file.write_all(parsed_data.as_bytes())?;
 
         Ok(())
+    }
+
+    pub fn write_assets(&self) -> Result<Vec<(u32, anyhow::Error)>> {
+        let Some(folder) = self.folder() else {
+            return Err(anyhow!(AssetsError::NoFolderLoaded));
+        };
+
+        let results = self.iter().filter_map(|(id, asset_path, asset)| {
+            let result: Result<()> = (|| {
+                let bytes = asset.as_bytes()?;
+
+                let path = folder + asset_path;
+
+                let mut file = File::options()
+                    .write(true)
+                    .truncate(true)
+                    .create(true)
+                    .open(path)?;
+
+                file.write_all(&bytes)?;
+
+                Ok(())
+            })();
+
+            result.err().map(|err| {
+                (
+                    *id,
+                    err.context(format!("Failed to save {asset_path} ({id})")),
+                )
+            })
+        });
+
+        Ok(results.collect())
     }
 }
 

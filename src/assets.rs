@@ -7,6 +7,7 @@ mod ui;
 pub use asset_path::AssetPath;
 pub use character::Character;
 pub use image::{Image, default_image};
+use ron::ser::PrettyConfig;
 pub use ui::{update, view};
 
 use std::{collections::HashMap, ops::Index, path::PathBuf, str::FromStr};
@@ -36,6 +37,31 @@ impl Asset {
             Self::Image(_) => AssetKind::Image,
             Self::Character(_) => AssetKind::Character,
         }
+    }
+
+    fn inner(&self) -> &dyn AsBytes {
+        match self {
+            Asset::Image(image) => image,
+            Asset::Character(character) => character,
+        }
+    }
+}
+
+impl AsBytes for Asset {
+    fn as_bytes(&self) -> Result<Vec<u8>> {
+        self.inner().as_bytes()
+    }
+}
+
+trait AsBytes {
+    fn as_bytes(&self) -> Result<Vec<u8>>;
+}
+
+impl<T: Serialize> AsBytes for T {
+    fn as_bytes(&self) -> Result<Vec<u8>> {
+        ron::ser::to_string_pretty(self, PrettyConfig::new())
+            .map(|string| string.as_bytes().to_vec())
+            .map_err(|err| anyhow!(err))
     }
 }
 
@@ -220,6 +246,14 @@ impl AssetsData {
 
     pub fn is_renaming(&self) -> bool {
         self.renaming.is_some()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (&u32, &AssetPath, &Asset)> {
+        self.index.iter().filter_map(|(id, asset_path)| {
+            self.assets
+                .get(asset_path)
+                .map(|asset| (id, asset_path, asset))
+        })
     }
 }
 
