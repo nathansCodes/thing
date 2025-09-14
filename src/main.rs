@@ -1,11 +1,10 @@
 mod assets;
-mod io;
 mod notification;
 mod positioning_schemes;
 mod style;
 mod widgets;
 
-use crate::assets::{Asset, AssetHandle, AssetKind, Character};
+use crate::assets::{Asset, AssetHandle, AssetKind, Character, io};
 use crate::notification::Notification;
 use crate::widgets::dialog::{Dialog, DialogOption};
 use crate::widgets::dnd::{dnd_indicator, dnd_receiver};
@@ -35,9 +34,9 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use crate::{
+    assets::io::{AssetsError, pick_file, pick_folder},
     assets::{AssetsData, AssetsMessage},
     graph::GraphData,
-    io::{AssetsError, pick_file, pick_folder},
 };
 
 fn main() -> iced::Result {
@@ -312,7 +311,7 @@ fn view(state: &State) -> Element<'_, Message> {
         )
     ];
 
-    let default_img = assets::Image::new(assets::default_image());
+    let default_img = assets::default_image();
 
     widgets::dialog(
         &state.dialog,
@@ -362,7 +361,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                             .assets
                             .path(handle)
                             .unwrap()
-                            .name()
+                            .file_name()
                             .split('.')
                             .next()
                             .unwrap()
@@ -406,6 +405,16 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 if let Some(err) = state.assets.last_error() {
                     state.notifications.push(Notification::error(
                         "Failed to rename asset",
+                        format!("{err:#}"),
+                    ));
+                }
+
+                Task::none()
+            }
+            AssetsMessage::LoadAssetFailed(..) => {
+                if let Some(err) = state.assets.last_error() {
+                    state.notifications.push(Notification::error(
+                        "Failed to load asset",
                         format!("{err:#}"),
                     ));
                 }
@@ -483,7 +492,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
 
             Task::done(Message::AssetsMessage(AssetsMessage::LoadAssets(path)))
         }
-        Message::LoadData(path) => Task::done(match io::load(path.clone()) {
+        Message::LoadData(path) => Task::done(match io::load(&path) {
             Ok(raw_data) => Message::ParseData(raw_data, path.clone()),
             Err(err) => {
                 state.last_error = Some(err);
@@ -552,7 +561,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         },
         Message::AddExternalAsset(path) => {
-            let res = io::copy_to_assets_dir(state.assets.folder().cloned(), path.clone());
+            let res = state.assets.copy_to_assets_dir(&path);
 
             Task::done(match res {
                 Ok((path, asset)) => Message::AddAsset(
@@ -585,8 +594,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::Save => {
             let parsed = ron::ser::to_string_pretty(&state.nodes, PrettyConfig::new()).unwrap();
 
-            if let Some(folder) = &state.assets.folder() {
-                match io::save(folder.join("data.ron"), parsed) {
+            if let Some(folder) = state.assets.folder() {
+                match io::save(folder, parsed) {
                     Ok(()) => Task::done(Message::Saved),
                     Err(err) => {
                         state.last_error = Some(err);
@@ -809,6 +818,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::EscapePressed => {
             if state.dialog.is_some() {
                 Task::done(Message::CloseDialog)
+            } else if state.assets.is_renaming() {
+                Task::done(Message::AssetsMessage(AssetsMessage::SetRenameInput(None)))
             } else if state.assets.query_present() {
                 Task::done(Message::AssetsMessage(AssetsMessage::QueryChanged(None)))
             } else {

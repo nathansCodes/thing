@@ -11,11 +11,11 @@ pub struct Character {
 impl<'a> TryFrom<&'a Asset> for &'a Character {
     type Error = ();
 
-    #[allow(unreachable_patterns)]
     fn try_from(asset: &'a Asset) -> Result<Self, Self::Error> {
-        match asset {
-            Asset::Character(chara) => Ok(chara),
-            _ => Err(()),
+        if let Asset::Character(chara) = asset {
+            Ok(chara)
+        } else {
+            Err(())
         }
     }
 }

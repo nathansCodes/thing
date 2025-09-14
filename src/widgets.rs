@@ -190,8 +190,8 @@ pub fn node<'a>(
                     image(
                         assets
                             .get_direct::<Image>(chara.img)
-                            .map(|img| img.handle.clone())
-                            .unwrap_or(default_image())
+                            .map(|img| &img.handle)
+                            .unwrap_or(&default_image().handle)
                     )
                     .width(Fill)
                     .height(Fill)

@@ -1,28 +1,64 @@
-use iced::widget::image;
+use std::io::{Cursor, Write};
+
+use iced::{
+    advanced::graphics::image::image_rs::{ImageFormat, RgbaImage},
+    widget::image as iced_image,
+};
 
 use crate::assets::Asset;
+
+use serde::ser::{Serialize, Serializer};
 
 const DEFAULT_IMAGE: &[u8] = include_bytes!("../../assets/default.png").as_slice();
 
 #[derive(Clone, Debug)]
 pub struct Image {
-    pub handle: image::Handle,
+    format: ImageFormat,
+    pub handle: iced_image::Handle,
 }
 
 impl Image {
-    pub fn new(handle: image::Handle) -> Self {
-        Self { handle }
+    pub fn new(format: ImageFormat, handle: iced_image::Handle) -> Self {
+        Self { format, handle }
+    }
+}
+
+impl Serialize for Image {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut bytes = Cursor::new(Vec::new());
+
+        match &self.handle {
+            iced_image::Handle::Path(..) => (),
+            iced_image::Handle::Bytes(_, img_bytes) => {
+                let _ = bytes.write_all(img_bytes);
+            }
+            iced_image::Handle::Rgba {
+                id: _,
+                width,
+                height,
+                pixels,
+            } => {
+                if let Some(img) = RgbaImage::from_raw(*width, *height, pixels.to_vec()) {
+                    let _ = img.write_to(&mut bytes, self.format);
+                }
+            }
+        };
+
+        serializer.serialize_bytes(bytes.into_inner().as_slice())
     }
 }
 
 impl<'a> TryFrom<&'a Asset> for &'a Image {
     type Error = ();
 
-    #[allow(unreachable_patterns)]
     fn try_from(asset: &'a Asset) -> Result<Self, Self::Error> {
-        match asset {
-            Asset::Image(image) => Ok(image),
-            _ => Err(()),
+        if let Asset::Image(image) = asset {
+            Ok(image)
+        } else {
+            Err(())
         }
     }
 }
@@ -33,6 +69,9 @@ impl From<Image> for Asset {
     }
 }
 
-pub fn default_image() -> image::Handle {
-    image::Handle::from_bytes(DEFAULT_IMAGE)
+pub fn default_image() -> Image {
+    Image::new(
+        ImageFormat::Png,
+        iced_image::Handle::from_bytes(DEFAULT_IMAGE),
+    )
 }

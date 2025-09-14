@@ -1,4 +1,9 @@
-use std::{fmt::Display, ops::Add, path::PathBuf, str::FromStr};
+use std::{
+    fmt::Display,
+    ops::{Add, AddAssign},
+    path::PathBuf,
+    str::FromStr,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -23,7 +28,17 @@ impl AssetPath {
     }
 
     pub fn name(&self) -> &str {
+        self.name.split('.').next().unwrap_or("")
+    }
+
+    pub fn file_name(&self) -> &str {
         &self.name
+    }
+
+    pub fn extension(&self) -> &str {
+        let first_dot = self.name.find('.');
+
+        first_dot.map_or("", |pos| &self.name[pos..])
     }
 }
 
@@ -48,6 +63,20 @@ impl Display for AssetPath {
     }
 }
 
+impl AddAssign<AssetPath> for PathBuf {
+    fn add_assign(&mut self, rhs: AssetPath) {
+        self.push(format!("{}", rhs))
+    }
+}
+
+impl Add<&AssetPath> for &PathBuf {
+    type Output = PathBuf;
+
+    fn add(self, rhs: &AssetPath) -> Self::Output {
+        self.join(format!("{}", rhs))
+    }
+}
+
 impl Add<AssetPath> for &PathBuf {
     type Output = PathBuf;
 
@@ -61,6 +90,17 @@ impl Add<AssetPath> for PathBuf {
 
     fn add(self, rhs: AssetPath) -> Self::Output {
         self.join(format!("{}", rhs))
+    }
+}
+
+impl Add<&str> for AssetKind {
+    type Output = AssetPath;
+
+    fn add(self, name: &str) -> Self::Output {
+        AssetPath {
+            kind: self,
+            name: name.to_string(),
+        }
     }
 }
 

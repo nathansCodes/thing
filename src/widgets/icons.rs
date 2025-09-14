@@ -66,7 +66,7 @@ pub fn image<'a>() -> Text<'a, iced::Theme, iced::Renderer> {
     icon(IMAGE)
 }
 
-pub const USER: char = '\u{E809}';
+pub const USER: char = '\u{E80A}';
 
 pub fn user<'a>() -> Text<'a, iced::Theme, iced::Renderer> {
     icon(USER)

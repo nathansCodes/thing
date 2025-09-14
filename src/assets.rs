@@ -1,6 +1,7 @@
 mod asset_path;
 mod character;
 pub mod image;
+pub mod io;
 mod ui;
 
 pub use asset_path::AssetPath;
@@ -13,7 +14,7 @@ use std::{collections::HashMap, ops::Index, path::PathBuf, str::FromStr};
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-use crate::io::AssetsError;
+use crate::assets::io::AssetsError;
 
 #[derive(Debug, Clone)]
 pub enum Asset {
@@ -216,6 +217,10 @@ impl AssetsData {
     pub fn last_error(&self) -> Option<&anyhow::Error> {
         self.last_error.as_ref()
     }
+
+    pub fn is_renaming(&self) -> bool {
+        self.renaming.is_some()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -233,4 +238,5 @@ pub enum AssetsMessage {
     RenameAsset,
     RenameAssetFailed(AssetHandle),
     ShowHideViewDropdown,
+    LoadAssetFailed(u32, AssetPath),
 }

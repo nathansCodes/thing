@@ -1,8 +1,11 @@
-use std::io;
+use std::{collections::HashMap, io};
 
+use super::io::AssetsError;
 use crate::{
-    assets::{Asset, AssetHandle, AssetKind, AssetPath, AssetsData, AssetsMessage, Image, Mode},
-    io::{AssetsError, load_dir, write_index},
+    assets::{
+        Asset, AssetHandle, AssetKind, AssetPath, AssetsData, AssetsMessage, Image, Mode,
+        io::load_dir,
+    },
     style,
     widgets::{self, dnd::dnd_provider, dropdown, icons},
 };
@@ -18,7 +21,7 @@ use iced::{
 };
 use iced_aw::ContextMenu;
 
-use anyhow::anyhow;
+use anyhow::{Result, anyhow};
 
 pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMessage> {
     match message {
@@ -34,26 +37,57 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
                 return Task::done(AssetsMessage::LoadFailed);
             }
 
-            let message = if !path.is_dir() {
+            if !path.is_dir() {
                 state.last_error = Some(
                     anyhow!(io::Error::from(io::ErrorKind::AlreadyExists))
                         .context(format!("Couldn't create {path:?}")),
                 );
-                AssetsMessage::LoadFailed
+                Task::done(AssetsMessage::LoadFailed)
             } else {
-                match load_dir(path.clone()) {
-                    Ok(files) => AssetsMessage::LoadCompleted(path, files),
+                match load_dir(&path) {
+                    Ok(files) => {
+                        let (succeeded, failed) = {
+                            #[allow(clippy::type_complexity)]
+                            let (succeeded, failed): (
+                                HashMap<u32, (AssetPath, Result<Asset>)>,
+                                HashMap<u32, (AssetPath, Result<Asset>)>,
+                            ) = files.into_iter().partition(|(_, (_, res))| res.is_ok());
+
+                            let succeeded = succeeded
+                                .into_iter()
+                                .map(|(id, (asset_path, res))| (id, (asset_path, res.unwrap())))
+                                .collect();
+
+                            let failed = failed
+                                .into_iter()
+                                .map(|(id, (asset_path, res))| (id, asset_path, res.unwrap_err()));
+
+                            (succeeded, failed)
+                        };
+
+                        let failed_messages = failed.into_iter().map(|(id, asset_path, err)| {
+                            state.last_error = Some(
+                                err.context(format!("Couldn't load asset {asset_path} ({id})")),
+                            );
+
+                            AssetsMessage::LoadAssetFailed(id, asset_path)
+                        });
+
+                        Task::batch(
+                            std::iter::once(AssetsMessage::LoadCompleted(path, succeeded))
+                                .chain(failed_messages)
+                                .map(Task::done),
+                        )
+                    }
                     Err(err) => {
                         println!("{err}");
                         state.last_error =
                             Some(anyhow!(err).context(format!("Couldn't load {path:?}")));
 
-                        AssetsMessage::LoadFailed
+                        Task::done(AssetsMessage::LoadFailed)
                     }
                 }
-            };
-
-            Task::done(message)
+            }
         }
         AssetsMessage::LoadCompleted(_, assets) => {
             for (id, (asset_path, asset)) in assets.into_iter() {
@@ -105,7 +139,7 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
                 return Task::none();
             };
 
-            let new_path = AssetPath::new(old_path.kind(), new_name.clone());
+            let new_path = AssetPath::new(old_path.kind(), new_name.clone() + old_path.extension());
 
             state.index.insert(handle.0, new_path.clone());
 
@@ -123,9 +157,7 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
                 return Task::done(AssetsMessage::RenameAssetFailed(handle));
             };
 
-            let res = write_index(&state.index, state.folder.clone());
-
-            match res {
+            match state.write_index() {
                 Ok(_) => {
                     let asset = state.assets.remove(&old_path).unwrap();
                     state.assets.insert(new_path.clone(), asset);
@@ -133,16 +165,14 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
                     Task::none()
                 }
                 Err(err) => {
-                    if let Some(err) = err.downcast_ref::<AssetsError>() {
-                        state.last_error = Some(anyhow!(err.clone()).context(err_ctx));
+                    state.last_error = Some(anyhow!(err).context(err_ctx));
 
-                        return Task::done(AssetsMessage::RenameAssetFailed(handle));
-                    }
-                    Task::none()
+                    Task::done(AssetsMessage::RenameAssetFailed(handle))
                 }
             }
         }
         AssetsMessage::RenameAssetFailed(..) => Task::none(),
+        AssetsMessage::LoadAssetFailed(..) => Task::none(),
     }
 }
 
@@ -153,13 +183,15 @@ fn image_item<'a>(
     state: &'a AssetsData,
     img: &'a Image,
 ) -> Element<'a, AssetsMessage, iced::Theme, iced::Renderer> {
-    let rename_input = state.renaming.as_ref().map(|(rn_handle, input)| {
-        text_input("Rename...", input.as_str())
-            .on_input(|input| AssetsMessage::SetRenameInput(Some((*rn_handle, input))))
-            .on_submit(AssetsMessage::RenameAsset)
+    let rename_input = state.renaming.as_ref().and_then(|(rn_handle, input)| {
+        (*rn_handle == handle).then_some(
+            text_input("Rename...", input.as_str())
+                .on_input(|input| AssetsMessage::SetRenameInput(Some((*rn_handle, input))))
+                .on_submit(AssetsMessage::RenameAsset),
+        )
     });
 
-    let file_name = path.name();
+    let name = path.name();
 
     match state.mode {
         Mode::Thumbnails => button(
@@ -170,7 +202,7 @@ fn image_item<'a>(
                     .filter_method(widget::image::FilterMethod::Nearest),
                 rename_input
                     .map(|ri| Element::from(ri.width(100.0).align_x(Alignment::Center)))
-                    .unwrap_or(text(file_name).width(100.0).center().into())
+                    .unwrap_or(text(name).width(100.0).center().into())
             ]
             .spacing(5.0)
             .padding(5.0),
@@ -185,9 +217,7 @@ fn image_item<'a>(
                     .height(30)
                     .width(30)
                     .filter_method(widget::image::FilterMethod::Nearest),
-                rename_input
-                    .map(Element::from)
-                    .unwrap_or(text(file_name).into())
+                rename_input.map(Element::from).unwrap_or(text(name).into())
             ]
             .width(Fill)
             .height(40)
@@ -235,7 +265,7 @@ pub fn view(state: &AssetsData) -> Element<'_, AssetsMessage> {
         ContextMenu::new(img_element, move || {
             container(column![widgets::menu_button(
                 "Rename",
-                AssetsMessage::SetRenameInput(Some((handle, path.to_string())))
+                AssetsMessage::SetRenameInput(Some((handle, path.name().to_string())))
             )])
             .padding(4)
             .style(style::dropdown)
