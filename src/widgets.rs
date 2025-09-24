@@ -20,7 +20,7 @@ use iced_aw::DropDown;
 
 use crate::{
     Message, Node,
-    assets::{AssetsData, Character, Image, image::default_image},
+    assets::{AssetsData, Character, Image, image::DEFAULT_IMAGE},
     notification::Notification,
     style,
     widgets::graph::{Graph, GraphData, GraphNode},
@@ -134,6 +134,55 @@ where
     Graph::new(data, view_node)
 }
 
+#[allow(clippy::type_complexity)]
+pub fn node<'a>(
+    assets: &'a AssetsData,
+) -> Box<dyn for<'any> Fn(&'any GraphNode<Node>) -> Element<'any, Message> + 'a> {
+    Box::new(|node| match node.data() {
+        Node::Character(handle) => {
+            let Some(chara) = assets.get_direct::<Character>(*handle) else {
+                return text("Couldn't load character.").into();
+            };
+            container(
+                column![
+                    image(
+                        &assets
+                            .get_direct::<Image>(chara.img)
+                            .unwrap_or(&DEFAULT_IMAGE)
+                            .handle
+                    )
+                    .width(Fill)
+                    .height(Fill)
+                    .filter_method(image::FilterMethod::Nearest),
+                    opaque(
+                        column![
+                            text(chara.name.clone()).center().width(Fill),
+                            base_button("ahkdlfjs").on_press(Message::CharacterButtonPressed)
+                        ]
+                        .width(Fill)
+                        .spacing(5.0)
+                    ),
+                ]
+                .spacing(5.0),
+            )
+            .width(150.0)
+            .height(150.0)
+            .padding(4.0)
+            .style(style::node(node.selected()))
+            .into()
+        }
+        Node::Family => container("")
+            .width(10.0)
+            .height(10.0)
+            .style(|theme: &Theme| container::Style {
+                text_color: None,
+                background: Some(theme.palette().success.into()),
+                border: Border::default().rounded(10.0),
+                ..Default::default()
+            })
+            .into(),
+    })
+}
 pub fn dropdown<'a, Message: Clone + 'a>(
     dropdown_open: bool,
     show_hide_dropdown: Message,
@@ -149,7 +198,7 @@ pub fn dropdown<'a, Message: Clone + 'a>(
                 icons::down()
             }
         ]
-        .spacing(8.0),
+        .spacing(6.0),
     )
     .on_press(show_hide_dropdown.clone())
     .style(style::primary_button);
@@ -174,54 +223,4 @@ pub fn dropdown<'a, Message: Clone + 'a>(
     DropDown::new(underlay, overlay, dropdown_open)
         .width(200.0)
         .on_dismiss(show_hide_dropdown)
-}
-
-#[allow(clippy::type_complexity)]
-pub fn node<'a>(
-    assets: &'a AssetsData,
-) -> Box<dyn for<'any> Fn(&'any GraphNode<Node>) -> Element<'any, Message> + 'a> {
-    Box::new(|node| match node.data() {
-        Node::Character(handle) => {
-            let Some(chara) = assets.get_direct::<Character>(*handle) else {
-                return text("Couldn't load character.").into();
-            };
-            container(
-                column![
-                    image(
-                        assets
-                            .get_direct::<Image>(chara.img)
-                            .map(|img| &img.handle)
-                            .unwrap_or(&default_image().handle)
-                    )
-                    .width(Fill)
-                    .height(Fill)
-                    .filter_method(image::FilterMethod::Nearest),
-                    opaque(
-                        column![
-                            text(chara.name.clone()).center().width(Fill),
-                            base_button("ahkdlfjs").on_press(Message::CharacterButtonPressed)
-                        ]
-                        .width(Fill)
-                        .spacing(5.0)
-                    ),
-                ]
-                .spacing(5.0),
-            )
-            .width(150.0)
-            .height(150.0)
-            .padding(5.0)
-            .style(style::node(node.selected()))
-            .into()
-        }
-        Node::Family => container("")
-            .width(10.0)
-            .height(10.0)
-            .style(|theme: &Theme| container::Style {
-                text_color: None,
-                background: Some(theme.palette().success.into()),
-                border: Border::default().rounded(10.0),
-                ..Default::default()
-            })
-            .into(),
-    })
 }

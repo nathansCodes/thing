@@ -1,7 +1,7 @@
 use iced::border::Radius;
 use iced::gradient::{ColorStop, Linear};
 use iced::widget::{self, button, container, rule, slider};
-use iced::{Border, Color, Gradient, Radians, Shadow, Theme, Vector};
+use iced::{Background, Border, Color, Gradient, Radians, Shadow, Theme, Vector};
 use iced_aw::style::menu_bar;
 use palette::convert::FromColorUnclamped;
 use palette::rgb::Rgba;
@@ -10,70 +10,97 @@ use palette::{IntoColor, LinSrgba, Mix, Oklab};
 use crate::notification::{self, Severity};
 
 fn base_button(theme: &Theme, status: button::Status, accent: Color) -> button::Style {
+    use button::Status::*;
+
     let palette = theme.extended_palette();
 
     let base = button::Style {
-        border: Border::default().rounded(10.0),
+        border: Border::default().rounded(6.0),
         text_color: palette.background.base.text,
         ..button::primary(theme, status)
     };
 
     let btn_bg_a = theme.palette().background;
 
-    let btn_bg_b = if let button::Status::Disabled = status {
+    let btn_bg_b = if let Disabled = status {
         palette.secondary.base.color
     } else {
         accent
     };
 
-    let btn_gradient_a = mix_colors(
-        btn_bg_a,
-        btn_bg_b,
-        if let button::Status::Hovered | button::Status::Pressed = status {
-            0.35
-        } else {
-            0.25
-        },
-    );
-
-    let btn_gradient_b = mix_colors(
-        btn_bg_a,
-        btn_bg_b,
-        if let button::Status::Hovered | button::Status::Pressed = status {
-            0.6
-        } else {
-            0.4
-        },
-    );
-
-    let angle = if status == button::Status::Pressed {
-        Radians::PI
-    } else {
-        Radians::from(0.0)
+    let dark_t = match status {
+        Active => 0.25,
+        Hovered => 0.3,
+        Pressed => 0.15,
+        Disabled => 0.1,
     };
 
-    let btn_bg = Gradient::Linear(Linear::new(angle).add_stops([
+    let dark = mix_colors(btn_bg_a, btn_bg_b, dark_t);
+
+    let darker_t = match status {
+        Active => 0.225,
+        Hovered => 0.275,
+        Pressed => 0.125,
+        Disabled => 0.075,
+    };
+
+    let darker = mix_colors(btn_bg_a, btn_bg_b, darker_t);
+
+    let light_t = match status {
+        Active => 0.5,
+        Hovered => 0.5,
+        Pressed => 0.45,
+        Disabled => 0.4,
+    };
+
+    let light = mix_colors(btn_bg_a, btn_bg_b, light_t);
+
+    let lighter = mix_colors(
+        light,
+        palette.background.base.text,
+        if let Hovered = status { 0.25 } else { 0.075 },
+    );
+
+    let btn_bg = Gradient::Linear(Linear::new(Radians::from(0.0)).add_stops([
         ColorStop {
             offset: 0.0,
-            color: btn_gradient_a,
+            color: light,
         },
         ColorStop {
-            offset: 0.6,
-            color: btn_gradient_b,
+            offset: 0.15,
+            color: dark,
+        },
+        ColorStop {
+            offset: 0.49,
+            color: darker,
+        },
+        ColorStop {
+            offset: 0.51,
+            color: light,
+        },
+        ColorStop {
+            offset: 0.625,
+            color: light,
+        },
+        ColorStop {
+            offset: 0.9,
+            color: lighter,
         },
     ]));
 
-    let btn_text = if let button::Status::Disabled = status {
+    let btn_text = if let Disabled = status {
         palette.secondary.base.color
     } else {
         accent
     };
+
+    let border_color = mix_colors(light, dark, 0.3);
 
     button::Style {
         background: Some(btn_bg.into()),
         text_color: btn_text,
         border: Border {
-            color: btn_gradient_b,
+            color: border_color,
             width: 2.0,
             ..base.border
         },
@@ -179,6 +206,31 @@ pub fn text_input(theme: &Theme, status: widget::text_input::Status) -> widget::
     }
 }
 
+pub fn text_input_inline(
+    theme: &Theme,
+    status: widget::text_input::Status,
+) -> widget::text_input::Style {
+    use widget::text_input::*;
+
+    let palette = theme.extended_palette();
+
+    let border_color = match status {
+        Status::Active => palette.background.strong.color,
+        Status::Hovered => palette.primary.weak.color,
+        Status::Focused => palette.primary.base.color,
+        Status::Disabled => palette.secondary.base.color,
+    };
+
+    Style {
+        background: Background::Color(Color::TRANSPARENT),
+        border: Border::default(),
+        icon: border_color,
+        placeholder: palette.secondary.weak.color,
+        value: palette.background.base.text,
+        selection: palette.primary.base.color,
+    }
+}
+
 pub fn menu_bar(theme: &Theme, _status: iced_aw::style::Status) -> menu_bar::Style {
     let palette = theme.extended_palette();
 
@@ -220,7 +272,7 @@ pub fn menu_bar(theme: &Theme, _status: iced_aw::style::Status) -> menu_bar::Sty
         menu_background: palette.background.base.color.into(),
         menu_border: Border::default()
             .width(2.0)
-            .rounded(14.0)
+            .rounded(10.0)
             .color(palette.background.weak.color),
         menu_shadow: Shadow {
             color: Color::BLACK,
@@ -257,7 +309,7 @@ pub fn dropdown(theme: &Theme) -> container::Style {
         background: Some(palette.background.base.color.into()),
         border: Border::default()
             .width(2.0)
-            .rounded(14.0)
+            .rounded(10.0)
             .color(palette.background.weak.color),
         shadow: Shadow {
             color: Color::BLACK,
@@ -268,7 +320,112 @@ pub fn dropdown(theme: &Theme) -> container::Style {
     }
 }
 
-pub fn title_bar_active(theme: &Theme) -> container::Style {
+pub fn title_bar(theme: &Theme) -> container::Style {
+    let palette = theme.extended_palette();
+
+    let bg_start = mix_colors(
+        palette.background.base.color,
+        palette.background.weak.color,
+        0.6,
+    );
+    let bg_mid = mix_colors(
+        palette.background.base.color,
+        palette.background.weak.color,
+        0.8,
+    );
+    let bg_end = mix_colors(
+        palette.background.base.color,
+        palette.background.weak.color,
+        0.7,
+    );
+
+    let bg = Gradient::Linear(Linear::new(0).add_stops([
+        ColorStop {
+            offset: 0.0,
+            color: bg_start,
+        },
+        ColorStop {
+            offset: 0.4,
+            color: bg_mid,
+        },
+        ColorStop {
+            offset: 0.85,
+            color: bg_end,
+        },
+    ]));
+
+    container::Style {
+        background: Some(bg.into()),
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 2.0,
+            radius: Radius::new(0).top(8),
+        },
+        ..container::transparent(theme)
+    }
+}
+
+pub fn title_bar_focused(theme: &Theme) -> container::Style {
+    let palette = theme.extended_palette();
+
+    let base = mix_colors(
+        palette.background.base.color,
+        palette.primary.base.color,
+        0.1,
+    );
+
+    let weak = mix_colors(
+        palette.background.weak.color,
+        palette.primary.weak.color,
+        0.15,
+    );
+
+    let bg_start = mix_colors(base, weak, 0.6);
+    let bg_mid = mix_colors(base, weak, 0.8);
+    let bg_end = mix_colors(base, weak, 0.7);
+
+    let bg = Gradient::Linear(Linear::new(0).add_stops([
+        ColorStop {
+            offset: 0.0,
+            color: bg_start,
+        },
+        ColorStop {
+            offset: 0.4,
+            color: bg_mid,
+        },
+        ColorStop {
+            offset: 0.85,
+            color: bg_end,
+        },
+    ]));
+
+    container::Style {
+        background: Some(bg.into()),
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 2.0,
+            radius: Radius::new(0).top(8),
+        },
+        ..container::transparent(theme)
+    }
+}
+
+pub fn title_bar_label_container(theme: &Theme) -> container::Style {
+    container::Style {
+        shadow: Shadow {
+            color: theme.palette().background.scale_alpha(0.5),
+            offset: Vector::new(2.0, 3.0),
+            blur_radius: 6.0,
+        },
+        border: Border {
+            radius: Radius::new(0.0).top_left(6).bottom_right(6),
+            ..Default::default()
+        },
+        ..container::transparent(theme)
+    }
+}
+
+pub fn title_bar_label(theme: &Theme) -> container::Style {
     let palette = theme.extended_palette();
 
     let bg_start = mix_colors(
@@ -281,27 +438,37 @@ pub fn title_bar_active(theme: &Theme) -> container::Style {
     let gradient = Gradient::Linear(Linear::new(Radians::PI).add_stops([
         ColorStop {
             offset: 0.0,
-            color: bg_start,
+            color: bg_end,
         },
         ColorStop {
             offset: 0.6,
-            color: bg_end,
+            color: bg_start,
         },
     ]));
 
+    let text_color = mix_colors(
+        palette.background.base.text,
+        palette.background.strong.text,
+        0.5,
+    );
+
     container::Style {
-        text_color: Some(palette.background.weak.text),
+        text_color: Some(text_color),
         background: Some(gradient.into()),
         border: Border {
-            radius: Radius::new(8.0).bottom(0.0),
+            radius: Radius::new(0).top_left(6).bottom_right(6),
             width: 2.0,
-            color: bg_end,
+            color: bg_start,
         },
-        ..Default::default()
+        shadow: Shadow {
+            color: Color::BLACK,
+            offset: Vector::ZERO,
+            blur_radius: 4.0,
+        },
     }
 }
 
-pub fn title_bar_focused(theme: &Theme) -> container::Style {
+pub fn title_bar_label_focused(theme: &Theme) -> container::Style {
     let palette = theme.extended_palette();
 
     let bg_start = mix_colors(
@@ -326,7 +493,7 @@ pub fn title_bar_focused(theme: &Theme) -> container::Style {
         text_color: Some(palette.primary.strong.text),
         background: Some(gradient.into()),
         border: Border {
-            radius: Radius::new(8.0).bottom(0.0),
+            radius: Radius::new(0).top_left(6).bottom_right(6),
             width: 2.0,
             color: bg_end,
         },
@@ -436,7 +603,7 @@ pub fn node<'a>(selected: bool) -> container::StyleFn<'a, Theme> {
         container::Style {
             background: Some(bg.into()),
             border: Border::default()
-                .rounded(15.0)
+                .rounded(10.0)
                 .width(2.0)
                 .color(gradient_end),
             text_color: selected.then_some(base_color),
@@ -445,7 +612,7 @@ pub fn node<'a>(selected: bool) -> container::StyleFn<'a, Theme> {
     })
 }
 
-/// (bg_gradient_start, bg_gradient_end, text_color)
+/// returns `(bg_gradient_start, bg_gradient_end, text_color)`
 fn notification_bg_colors(theme: &Theme, severity: Severity) -> (Color, Color, Color) {
     let palette = theme.extended_palette();
 
@@ -773,63 +940,27 @@ pub fn info_bar_zoom_slider(theme: &Theme, status: slider::Status) -> slider::St
     }
 }
 
+pub fn list_thumbnail(theme: &Theme, status: button::Status) -> button::Style {
+    menu_button(theme, status)
+}
+
 pub fn list_item<'a>(even: bool) -> button::StyleFn<'a, Theme> {
     Box::new(move |theme: &Theme, status: button::Status| {
-        let default = button::Style::default();
+        let base = menu_button(theme, status);
+        let grey = secondary_button(theme, button::Status::Hovered);
 
-        let palette = theme.extended_palette();
-
-        let (color, text_color) = match status {
-            button::Status::Active | button::Status::Disabled => {
-                (theme.palette().background, theme.palette().text)
-            }
-            button::Status::Hovered | button::Status::Pressed => {
-                (palette.primary.base.color, palette.primary.base.color)
-            }
-        };
-
-        let opacity = match status {
-            button::Status::Active => 0.5,
-            button::Status::Hovered => 0.4,
-            button::Status::Pressed => 0.3,
-            button::Status::Disabled => 0.2,
-        };
-
-        let bg = Gradient::Linear(
-            Linear::new(0.0)
-                .add_stop(0.0, color.scale_alpha(opacity - 0.2))
-                .add_stop(0.4, color.scale_alpha(opacity - 0.1))
-                .add_stop(0.6, color.scale_alpha(opacity)),
-        );
-
-        let border = Border {
-            width: 2.0,
-            color: color.scale_alpha(opacity),
-            radius: Radius::new(8.0),
-        };
-
-        if even {
-            button::Style {
-                background: Some(bg.into()),
-                border,
-                text_color,
-                ..default
-            }
+        let style = if even && let button::Status::Active | button::Status::Disabled = status {
+            grey
         } else {
-            button::Style {
-                background: if status != button::Status::Active {
-                    Some(bg.into())
-                } else {
-                    default.background
-                },
-                border: if status != button::Status::Active {
-                    border
-                } else {
-                    Border::default()
-                },
-                text_color,
-                ..default
-            }
+            base
+        };
+
+        button::Style {
+            border: Border {
+                radius: Radius::new(0),
+                ..style.border
+            },
+            ..style
         }
     })
 }

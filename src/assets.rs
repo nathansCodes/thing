@@ -6,9 +6,9 @@ mod ui;
 
 pub use asset_path::AssetPath;
 pub use character::Character;
-pub use image::{Image, default_image};
+pub use image::Image;
 use ron::ser::PrettyConfig;
-pub use ui::{update, view};
+pub use ui::{update, view, view_controls};
 
 use std::{collections::HashMap, ops::Index, path::PathBuf, str::FromStr};
 
@@ -103,6 +103,15 @@ impl FromStr for AssetKind {
     }
 }
 
+impl std::fmt::Display for AssetKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            AssetKind::Image => "image",
+            AssetKind::Character => "character",
+        })
+    }
+}
+
 #[derive(Default, Debug, Clone, Copy)]
 pub enum Mode {
     #[default]
@@ -143,6 +152,18 @@ impl AssetsData {
         self.index
             .get(&handle.0)
             .and_then(|asset_path| self.assets.get_mut(asset_path))
+    }
+
+    pub fn get_all_of_type<'assets: 'asset, 'asset, A>(
+        &'assets self,
+    ) -> Vec<(&'asset AssetPath, &'asset A)>
+    where
+        &'asset A: TryFrom<&'asset Asset>,
+    {
+        self.assets
+            .iter()
+            .filter_map(|(path, asset)| <&A>::try_from(asset).ok().map(|asset| (path, asset)))
+            .collect()
     }
 
     pub fn get_direct<'assets: 'asset, 'asset, A>(
@@ -263,6 +284,7 @@ pub enum AssetsMessage {
     LoadCompleted(PathBuf, HashMap<u32, (AssetPath, Asset)>),
     LoadFailed,
     OpenAsset(AssetHandle),
+    EditAsset(AssetHandle),
     SetPayload(Option<crate::Draggable>),
     QueryChanged(Option<String>),
     ModeChanged(Mode),

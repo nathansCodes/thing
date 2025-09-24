@@ -1770,6 +1770,7 @@ dependencies = [
  "file_type",
  "iced",
  "iced_aw",
+ "lazy_static",
  "lyon_algorithms",
  "palette",
  "rfd",
@@ -2105,6 +2106,12 @@ checksum = "0de8b303297635ad57c9f5059fd9cee7a47f8e8daa09df0fcd07dd39fb22977f"
 dependencies = [
  "log",
 ]
+
+[[package]]
+name = "lazy_static"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lebe"

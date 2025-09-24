@@ -1,3 +1,4 @@
+use lazy_static::lazy_static;
 use std::io::{Cursor, Write};
 
 use iced::{
@@ -7,7 +8,16 @@ use iced::{
 
 use crate::assets::{AsBytes, Asset};
 
-const DEFAULT_IMAGE: &[u8] = include_bytes!("../../assets/default.png").as_slice();
+const DEFAULT_IMAGE_BYTES: &[u8] = include_bytes!("../../assets/default.png").as_slice();
+
+lazy_static! {
+    pub static ref DEFAULT_IMAGE: Image = {
+        Image::new(
+            ImageFormat::Png,
+            iced_image::Handle::from_bytes(DEFAULT_IMAGE_BYTES),
+        )
+    };
+}
 
 #[derive(Clone, Debug)]
 pub struct Image {
@@ -58,15 +68,20 @@ impl<'a> TryFrom<&'a Asset> for &'a Image {
     }
 }
 
+impl<'a> TryFrom<&'a mut Asset> for &'a mut Image {
+    type Error = ();
+
+    fn try_from(asset: &'a mut Asset) -> Result<Self, Self::Error> {
+        if let Asset::Image(image) = asset {
+            Ok(image)
+        } else {
+            Err(())
+        }
+    }
+}
+
 impl From<Image> for Asset {
     fn from(image: Image) -> Self {
         Asset::Image(image)
     }
-}
-
-pub fn default_image() -> Image {
-    Image::new(
-        ImageFormat::Png,
-        iced_image::Handle::from_bytes(DEFAULT_IMAGE),
-    )
 }

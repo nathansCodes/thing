@@ -13,10 +13,7 @@ use iced::{
     Alignment, Element,
     Length::{Fill, Shrink},
     Task,
-    widget::{
-        self, button, column, container, horizontal_space, responsive, row, scrollable, text,
-        text_input,
-    },
+    widget::{self, button, column, container, row, scrollable, text, text_input},
 };
 use iced_aw::ContextMenu;
 
@@ -104,6 +101,7 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
             Task::none()
         }
         AssetsMessage::OpenAsset(handle) => Task::done(AssetsMessage::OpenAsset(handle)),
+        AssetsMessage::EditAsset(handle) => Task::done(AssetsMessage::EditAsset(handle)),
         AssetsMessage::SetPayload(payload) => Task::done(AssetsMessage::SetPayload(payload)),
         AssetsMessage::QueryChanged(text) => {
             state.query = text;
@@ -175,13 +173,13 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
     }
 }
 
-fn image_item<'a>(
+pub fn image_item<'a>(
     i: usize,
     handle: AssetHandle,
     path: &'a AssetPath,
     state: &'a AssetsData,
     img: &'a Image,
-) -> Element<'a, AssetsMessage, iced::Theme, iced::Renderer> {
+) -> Element<'a, AssetsMessage> {
     let rename_input = state.renaming.as_ref().and_then(|(rn_handle, input)| {
         (*rn_handle == handle).then_some(
             text_input("Rename...", input.as_str())
@@ -207,7 +205,7 @@ fn image_item<'a>(
             .padding(5.0),
         )
         .padding(0)
-        .style(style::list_item(false))
+        .style(style::list_thumbnail)
         .on_press(AssetsMessage::OpenAsset(handle))
         .into(),
         Mode::List => button(
@@ -226,61 +224,13 @@ fn image_item<'a>(
         )
         .on_press(AssetsMessage::OpenAsset(handle))
         .padding(0)
-        .style(style::list_item(i % 2 == 0))
+        .style(style::list_item(i.is_multiple_of(2)))
         .into(),
     }
 }
 
-pub fn view(state: &AssetsData) -> Element<'_, AssetsMessage> {
-    let mut images: Vec<_> = state
-        .index
-        .iter()
-        .filter_map(|(id, asset_path)| {
-            state.assets.get(asset_path).and_then(|asset| {
-                let path_str = asset_path.to_string().to_lowercase();
-
-                (path_str.starts_with(state.view.folder())
-                    && path_str.contains(&state.query().to_lowercase()))
-                .then_some(())
-                .and_then(|_| match asset {
-                    Asset::Image(img) => Some(img),
-                    Asset::Character(character) => state.get_direct::<Image>(character.img),
-                })
-                .map(|img| (*id, asset_path, img))
-            })
-        })
-        .collect();
-
-    images.sort_by(|a, b| a.1.to_string().cmp(&b.1.to_string()));
-
-    let images = images.into_iter().enumerate().map(|(i, (id, path, img))| {
-        let handle = AssetHandle(id);
-        let img_element = dnd_provider(
-            AssetsMessage::SetPayload,
-            crate::Draggable::Asset(handle),
-            image_item(i, handle, path, state, img),
-        );
-
-        ContextMenu::new(img_element, move || {
-            container(column![widgets::menu_button(
-                "Rename",
-                AssetsMessage::SetRenameInput(Some((handle, path.name().to_string())))
-            )])
-            .padding(4)
-            .style(style::dropdown)
-            .into()
-        })
-        .into()
-    });
-
-    let layout = match state.mode {
-        Mode::Thumbnails => Element::from(row(images).spacing(5).width(Fill).wrap()),
-        Mode::List => Element::from(column(images).spacing(2).width(Fill)),
-    };
-
-    let content = scrollable(layout).style(style::scrollable);
-
-    let top_row = responsive(move |size| {
+pub fn view_controls(state: &AssetsData) -> Element<'_, AssetsMessage> {
+    container({
         let mode_dropdown = dropdown(
             state.mode_dropdown_open,
             AssetsMessage::ShowHideModeDropdown,
@@ -323,42 +273,98 @@ pub fn view(state: &AssetsData) -> Element<'_, AssetsMessage> {
 
         let search_button = button(icons::search().center())
             .width(30)
-            .on_press(AssetsMessage::QueryChanged(Some("".to_string())))
+            .on_press({
+                if state.query.is_some() {
+                    AssetsMessage::QueryChanged(None)
+                } else {
+                    AssetsMessage::QueryChanged(Some("".to_string()))
+                }
+            })
             .style(style::menu_button);
 
         let top_right_row = row![view_dropdown, mode_dropdown].spacing(4.0);
 
-        if let Some(query) = &state.query {
-            let search_bar = text_input("Search...", query)
-                .on_input(|input| AssetsMessage::QueryChanged(Some(input)))
-                .icon(text_input::Icon {
-                    font: icons::ICON_FONT,
-                    code_point: icons::SEARCH,
-                    size: None,
-                    spacing: 4.0,
-                    side: text_input::Side::Left,
-                })
-                .style(style::text_input);
+        row![search_button, top_right_row]
+            .spacing(4)
+            .align_y(Alignment::Center)
+            .padding([0, 4])
+            .width(Shrink)
+            .height(Fill)
+    })
+    .width(Shrink)
+    .into()
+}
 
-            if size.width <= 300.0 {
-                search_bar.into()
-            } else {
-                row![
-                    container(container(search_bar).width(Fill).max_width(300)).align_left(Fill),
-                    horizontal_space().width(Shrink),
-                    top_right_row
-                ]
-                .spacing(4)
-                .into()
-            }
-        } else {
-            row![search_button, horizontal_space(), top_right_row]
-                .spacing(4)
-                .into()
-        }
+pub fn view(state: &AssetsData) -> Element<'_, AssetsMessage> {
+    let mut images: Vec<_> = state
+        .index
+        .iter()
+        .filter_map(|(id, asset_path)| {
+            state.assets.get(asset_path).and_then(|asset| {
+                let path_str = asset_path.to_string().to_lowercase();
+
+                (path_str.starts_with(state.view.folder())
+                    && path_str.contains(&state.query().to_lowercase()))
+                .then_some(())
+                .and_then(|_| match asset {
+                    Asset::Image(img) => Some(img),
+                    Asset::Character(character) => state.get_direct::<Image>(character.img),
+                })
+                .map(|img| (*id, asset_path, img))
+            })
+        })
+        .collect();
+
+    images.sort_by(|a, b| a.1.to_string().cmp(&b.1.to_string()));
+
+    let images = images.into_iter().enumerate().map(|(i, (id, path, img))| {
+        let handle = AssetHandle(id);
+        let img_element = dnd_provider(
+            AssetsMessage::SetPayload,
+            crate::Draggable::Asset(handle),
+            image_item(i, handle, path, state, img),
+        );
+
+        ContextMenu::new(img_element, move || {
+            container(column![
+                widgets::menu_button(
+                    "Rename",
+                    AssetsMessage::SetRenameInput(Some((handle, path.name().to_string())))
+                )
+                .width(Fill),
+                widgets::menu_button("Edit", AssetsMessage::EditAsset(handle)).width(Fill)
+            ])
+            .padding(4)
+            .width(200)
+            .style(style::dropdown)
+            .into()
+        })
+        .into()
     });
 
-    column![container(top_row).height(30), content,]
-        .spacing(4.0)
-        .into()
+    let search_bar = state.query.as_ref().map(|query| {
+        text_input("Search...", query)
+            .on_input(|input| AssetsMessage::QueryChanged(Some(input)))
+            .icon(text_input::Icon {
+                font: icons::ICON_FONT,
+                code_point: icons::SEARCH,
+                size: None,
+                spacing: 4.0,
+                side: text_input::Side::Right,
+            })
+            .width(Fill)
+            .padding(4)
+            .style(style::text_input)
+    });
+
+    let layout = match state.mode {
+        Mode::Thumbnails => Element::from(row(images).spacing(5).padding(3).width(Fill).wrap()),
+        Mode::List => Element::from(column(images).spacing(2).width(Fill)),
+    };
+
+    let content = column![]
+        .push_maybe(search_bar)
+        .push(scrollable(layout).style(style::scrollable));
+
+    content.into()
 }

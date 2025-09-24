@@ -1,10 +1,14 @@
+#[allow(unused)]
 mod assets;
+mod edit;
 mod notification;
 mod positioning_schemes;
 mod style;
 mod widgets;
 
+use crate::assets::image::DEFAULT_IMAGE;
 use crate::assets::{Asset, AssetHandle, AssetKind, Character, io};
+use crate::edit::{EditMessage, EditPane};
 use crate::notification::Notification;
 use crate::widgets::dialog::{Dialog, DialogOption};
 use crate::widgets::dnd::{dnd_indicator, dnd_receiver};
@@ -17,15 +21,17 @@ use widgets::*;
 
 use anyhow::anyhow;
 use iced::keyboard::{Key, Modifiers};
-use iced::widget::{horizontal_space, row, scrollable, slider, stack, vertical_space};
+use iced::widget::{
+    horizontal_rule, horizontal_space, row, rule, scrollable, slider, stack, vertical_space,
+};
+use iced::{Alignment, Settings, Size, Subscription, Transformation, Vector, keyboard, window};
 use iced::{
-    Alignment, Element, Font,
+    Element, Font,
     Length::Fill,
     Padding, Point, Task, Theme,
     font::Weight,
     widget::{column, container, image, opaque, pane_grid, pane_grid::Configuration, text},
 };
-use iced::{Settings, Size, Subscription, Transformation, Vector, keyboard, window};
 use iced_aw::{menu, menu::Item, menu_bar};
 use serde::{Deserialize, Serialize};
 
@@ -51,6 +57,7 @@ fn main() -> iced::Result {
         })
         .subscription(subscription)
         .theme(|_| Theme::TokyoNight)
+        .transparent(true)
         .run_with(|| {
             (
                 State {
@@ -60,7 +67,12 @@ fn main() -> iced::Result {
                         axis: pane_grid::Axis::Vertical,
                         ratio: 0.25,
                         a: Box::new(Configuration::Pane(Pane::Assets)),
-                        b: Box::new(Configuration::Pane(Pane::Graph)),
+                        b: Box::new(Configuration::Split {
+                            axis: pane_grid::Axis::Vertical,
+                            ratio: 0.7,
+                            a: Box::new(Configuration::Pane(Pane::Graph)),
+                            b: Box::new(Configuration::Pane(Pane::Edit)),
+                        }),
                     }),
                     focus: None,
                     graph_position: Vector::ZERO,
@@ -69,6 +81,7 @@ fn main() -> iced::Result {
                     dnd_payload: None,
                     dialog: None,
                     last_error: None,
+                    edit_pane: EditPane::default(),
                 },
                 Task::none(),
             )
@@ -97,13 +110,13 @@ struct State {
     dnd_payload: Option<Draggable>,
     dialog: Option<Dialog<Message>>,
     last_error: Option<anyhow::Error>,
+    edit_pane: EditPane,
 }
 
-#[derive(Default, PartialEq)]
 enum Pane {
-    #[default]
     Assets,
     Graph,
+    Edit,
 }
 
 #[allow(clippy::enum_variant_names)]
@@ -139,6 +152,7 @@ enum Message {
     CloseDialog,
     EscapePressed,
     NotifyError,
+    EditMessage(EditMessage),
 }
 
 fn view(state: &State) -> Element<'_, Message> {
@@ -170,100 +184,83 @@ fn view(state: &State) -> Element<'_, Message> {
         let mut title_bar_font = Font::DEFAULT;
         title_bar_font.weight = Weight::Semibold;
 
-        let title_bar = pane_grid::TitleBar::new(
+        let title = container(
             container(
                 text(match pane {
                     Pane::Assets => "Assets",
                     Pane::Graph => "Graph",
+                    Pane::Edit => "Edit",
                 })
-                .size(14.0)
+                .size(15.0)
                 .font(title_bar_font),
             )
-            .padding(Padding::new(2.0).left(8.0).right(8.0))
-            .align_y(Alignment::Center),
+            .padding(Padding::new(4.0).left(8).right(8))
+            .style(if is_focused {
+                style::title_bar_label_focused
+            } else {
+                style::title_bar_label
+            }),
         )
-        .style(if is_focused {
-            style::title_bar_focused
-        } else {
-            style::title_bar_active
+        .style(style::title_bar_label_container);
+
+        let controls_full = container(match pane {
+            Pane::Assets => {
+                Element::from(assets::view_controls(&state.assets).map(Message::AssetsMessage))
+            }
+            Pane::Graph => "".into(),
+            Pane::Edit => "".into(),
+        })
+        .height(40);
+
+        let controls_compact = row![].height(40);
+
+        let title_bar = pane_grid::TitleBar::new(title)
+            .controls(pane_grid::Controls::dynamic(
+                controls_full,
+                controls_compact,
+            ))
+            .style(if is_focused {
+                style::title_bar_focused
+            } else {
+                style::title_bar
+            })
+            .always_show_controls()
+            .padding(2);
+
+        let content = match pane {
+            Pane::Graph => view_graph(state),
+            Pane::Assets => container(assets::view(&state.assets).map(Message::AssetsMessage))
+                .padding(2)
+                .into(),
+            Pane::Edit => state.edit_pane.view(state).map(Message::EditMessage),
+        };
+
+        let r1 = horizontal_rule(1).style(move |theme: &Theme| rule::Style {
+            color: if is_focused {
+                theme.extended_palette().primary.base.color
+            } else {
+                rule::default(theme).color
+            },
+            width: 2,
+            fill_mode: rule::FillMode::Padded(2),
+            ..rule::default(theme)
         });
 
-        let mut content = pane_grid::Content::new(match pane {
-            Pane::Graph => {
-                let graph = graph(&state.nodes, node(&state.assets))
-                    .position(state.graph_position)
-                    .zoom(state.graph_zoom)
-                    .on_event(Message::GraphEvent)
-                    .position_nodes(positioning_schemes::family_tree)
-                    .per_node_attachments(|node| {
-                        match node {
-                            Node::Character(_) => vec![
-                                (RelativeAttachment::top(), Vector::new(0.15, 0.15)),
-                                (RelativeAttachment::left(), Vector::new(0.15, 0.15)),
-                                (RelativeAttachment::right(), Vector::new(0.15, 0.15)),
-                            ],
-                            Node::Family => vec![
-                                (RelativeAttachment::top(), Vector::new(1.0, 1.0)),
-                                (RelativeAttachment::bottom(), Vector::new(1.0, 1.0)),
-                            ],
-                        }
-                        .into_iter()
-                    })
-                    .allow_self_connections(true)
-                    .allow_similar_connections(true);
+        let r2 = horizontal_rule(1).style(move |theme: &Theme| rule::Style {
+            color: if is_focused {
+                theme.extended_palette().primary.weak.color
+            } else {
+                theme.extended_palette().background.weak.color
+            },
+            width: 1,
+            fill_mode: rule::FillMode::Padded(2),
+            ..rule::default(theme)
+        });
 
-                let mut zoom_text = (state.graph_zoom * 100.0).round().to_string();
-                zoom_text.retain(|c| c != '.');
-
-                let info_bar = container(
-                    container(
-                        row![
-                            text(format!(
-                                "Position: {} {}",
-                                state.graph_position.x, state.graph_position.y
-                            ))
-                            .size(14.0),
-                            horizontal_space(),
-                            slider(0.5..=2.0, state.graph_zoom, |new_zoom| {
-                                Message::GraphEvent(GraphEvent::Zoom(new_zoom))
-                            })
-                            .width(100.0)
-                            .step(0.05)
-                            .style(style::info_bar_zoom_slider),
-                            text(zoom_text + "%")
-                                .size(13.0)
-                                .width(35.0)
-                                .align_x(Alignment::End),
-                        ]
-                        .spacing(4.0)
-                        .height(Fill)
-                        .align_y(Alignment::Center),
-                    )
-                    .padding([4.0, 8.0])
-                    .width(Fill)
-                    .height(30.0)
-                    .style(style::info_bar),
-                )
-                .style(style::info_bar_border)
-                .padding(Padding::new(2.0).bottom(1.0));
-
-                Element::from(dnd_receiver(
-                    |payload, relative_cursor_pos| match payload {
-                        Draggable::Asset(handle) => state
-                            .assets
-                            .is::<assets::Character>(handle)
-                            .then_some(Message::DropAssetOnGraph(handle, relative_cursor_pos)),
-                    },
-                    state.dnd_payload.clone(),
-                    stack![
-                        container(graph).padding(2.0).center_x(Fill).center_y(Fill),
-                        column![vertical_space(), info_bar,].padding(4.0)
-                    ],
-                ))
-            }
-            Pane::Assets => container(assets::view(&state.assets).map(Message::AssetsMessage))
-                .padding(Padding::new(5.0))
-                .into(),
+        let mut content = pane_grid::Content::new(if !matches!(pane, Pane::Graph) {
+            Element::from(column![r1, r2, content])
+        } else {
+            content
         })
         .style(match pane {
             Pane::Graph => |_: &Theme| container::Style::default(),
@@ -276,7 +273,7 @@ fn view(state: &State) -> Element<'_, Message> {
             }
         });
 
-        if *pane != Pane::Graph {
+        if !matches!(pane, Pane::Graph) {
             content = content.title_bar(title_bar);
         }
 
@@ -290,58 +287,53 @@ fn view(state: &State) -> Element<'_, Message> {
     .on_resize(10, Message::PaneResized);
 
     let notifications = row![
-        horizontal_space(),
-        opaque(
-            container(
-                scrollable(
-                    column(
-                        state
-                            .notifications
-                            .iter()
-                            .enumerate()
-                            .map(|(i, notification)| widgets::notification(i, notification).into())
-                    )
-                    .height(Shrink)
-                    .spacing(10.0)
-                    .padding(5.0)
+        container(opaque(
+            scrollable(
+                column(
+                    state
+                        .notifications
+                        .iter()
+                        .enumerate()
+                        .map(|(i, notification)| widgets::notification(i, notification).into())
                 )
-                .style(style::scrollable)
+                .height(Shrink)
+                .spacing(10.0)
+                .padding(5.0)
             )
-            .max_height(500.0)
-        )
+            .style(style::scrollable)
+        ))
+        .align_right(Fill)
+        .max_height(500.0)
     ];
 
-    let default_img = assets::default_image();
+    let payload = state.dnd_payload.clone().map(|draggable| {
+        let img = match draggable {
+            Draggable::Asset(handle) => state.assets.get(handle).map(|asset| match asset {
+                Asset::Image(img) => img.handle.clone(),
+                Asset::Character(character) => state
+                    .assets
+                    .get_direct::<assets::Image>(character.img)
+                    .unwrap_or(&DEFAULT_IMAGE)
+                    .handle
+                    .clone(),
+            }),
+        };
+
+        container(
+            image(img.as_ref().unwrap_or(&DEFAULT_IMAGE.handle))
+                .width(50.0)
+                .opacity(0.5),
+        )
+        .width(50.0)
+        .into()
+    });
 
     widgets::dialog(
         &state.dialog,
         column![
             menu_bar,
             stack![
-                dnd_indicator(
-                    state.dnd_payload.clone().map(|draggable| {
-                        let img = match draggable {
-                            Draggable::Asset(handle) => match state
-                                .assets
-                                .get(handle)
-                                .unwrap_or(&Asset::Image(default_img.clone()))
-                            {
-                                Asset::Image(img) => img.handle.clone(),
-                                Asset::Character(character) => state
-                                    .assets
-                                    .get_direct::<assets::Image>(character.img)
-                                    .unwrap_or(&default_img)
-                                    .handle
-                                    .clone(),
-                            },
-                        };
-
-                        container(image(img).width(50.0).opacity(0.5))
-                            .width(50.0)
-                            .into()
-                    }),
-                    container(grid)
-                ),
+                dnd_indicator(payload, container(grid).padding(2)),
                 notifications
             ]
         ],
@@ -420,6 +412,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 }
 
                 Task::none()
+            }
+            AssetsMessage::EditAsset(handle) => {
+                Task::done(Message::EditMessage(EditMessage::SetCurrent(handle)))
             }
             _ => assets::update(&mut state.assets, assets_message).map(Message::AssetsMessage),
         },
@@ -860,6 +855,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
 
             Task::none()
         }
+        Message::EditMessage(edit_message) => state
+            .edit_pane
+            .update(&mut state.assets, edit_message)
+            .map(Message::EditMessage),
     }
 }
 
@@ -882,4 +881,81 @@ fn subscription(_state: &State) -> Subscription<Message> {
         }),
         iced::time::every(Duration::from_millis(20)).map(|_| Message::Tick),
     ])
+}
+
+fn view_graph(state: &State) -> Element<'_, Message> {
+    let graph = graph(&state.nodes, node(&state.assets))
+        .position(state.graph_position)
+        .zoom(state.graph_zoom)
+        .on_event(Message::GraphEvent)
+        .position_nodes(positioning_schemes::family_tree)
+        .per_node_attachments(|node| {
+            match node {
+                Node::Character(_) => vec![
+                    (RelativeAttachment::top(), Vector::new(0.15, 0.15)),
+                    (RelativeAttachment::left(), Vector::new(0.15, 0.15)),
+                    (RelativeAttachment::right(), Vector::new(0.15, 0.15)),
+                ],
+                Node::Family => vec![
+                    (RelativeAttachment::top(), Vector::new(1.0, 1.0)),
+                    (RelativeAttachment::bottom(), Vector::new(1.0, 1.0)),
+                ],
+            }
+            .into_iter()
+        })
+        .allow_self_connections(true)
+        .allow_similar_connections(true);
+
+    let mut zoom_text = (state.graph_zoom * 100.0).round().to_string();
+    zoom_text.retain(|c| c != '.');
+
+    let info_bar = container(
+        container(
+            row![
+                text(format!(
+                    "Position: {} {}",
+                    state.graph_position.x, state.graph_position.y
+                ))
+                .size(14.0),
+                horizontal_space(),
+                slider(0.5..=2.0, state.graph_zoom, |new_zoom| {
+                    Message::GraphEvent(GraphEvent::Zoom(new_zoom))
+                })
+                .width(100.0)
+                .step(0.05)
+                .style(style::info_bar_zoom_slider),
+                text(zoom_text + "%")
+                    .size(13.0)
+                    .width(35.0)
+                    .align_x(Alignment::End),
+            ]
+            .spacing(4.0)
+            .height(Fill)
+            .align_y(Alignment::Center),
+        )
+        .padding([4.0, 8.0])
+        .width(Fill)
+        .height(30.0)
+        .style(style::info_bar),
+    )
+    .style(style::info_bar_border)
+    .padding(Padding::new(2.0).bottom(1.0));
+
+    Element::from(dnd_receiver(
+        |payload, relative_cursor_pos| match payload {
+            Draggable::Asset(handle) => state
+                .assets
+                .is::<assets::Character>(handle)
+                .then_some(Message::DropAssetOnGraph(handle, relative_cursor_pos)),
+        },
+        state.dnd_payload.clone(),
+        stack![
+            container(graph)
+                .padding(2.0)
+                .center_x(Fill)
+                .center_y(Fill)
+                .style(container::transparent),
+            column![vertical_space(), info_bar,].padding(4.0)
+        ],
+    ))
 }
