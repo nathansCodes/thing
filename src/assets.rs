@@ -285,6 +285,7 @@ pub enum AssetsMessage {
     LoadFailed,
     OpenAsset(AssetHandle),
     EditAsset(AssetHandle),
+    AddAssetToGraph(AssetHandle),
     SetPayload(Option<crate::Draggable>),
     QueryChanged(Option<String>),
     ModeChanged(Mode),

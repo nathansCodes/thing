@@ -12,8 +12,11 @@ use crate::{
 use iced::{
     Alignment, Element,
     Length::{Fill, Shrink},
-    Task,
-    widget::{self, button, column, container, row, scrollable, text, text_input},
+    Task, Theme,
+    widget::{
+        self, Rule, button, column, container, horizontal_rule, row, rule, scrollable, text,
+        text_input,
+    },
 };
 use iced_aw::ContextMenu;
 
@@ -170,6 +173,7 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
         }
         AssetsMessage::RenameAssetFailed(..) => Task::none(),
         AssetsMessage::LoadAssetFailed(..) => Task::none(),
+        AssetsMessage::AddAssetToGraph(_) => Task::none(),
     }
 }
 
@@ -326,14 +330,38 @@ pub fn view(state: &AssetsData) -> Element<'_, AssetsMessage> {
         );
 
         ContextMenu::new(img_element, move || {
-            container(column![
-                widgets::menu_button(
-                    "Rename",
-                    AssetsMessage::SetRenameInput(Some((handle, path.name().to_string())))
+            let extra_options = match path.kind() {
+                AssetKind::Image => vec![],
+                AssetKind::Character => vec![
+                    widgets::menu_item_button("Add to Graph", None, None)
+                        .on_press(AssetsMessage::AddAssetToGraph(AssetHandle(id)))
+                        .width(Fill)
+                        .into(),
+                ],
+            };
+
+            container(
+                column![
+                    widgets::menu_item_button("Rename", None, Some(icons::RENAME),)
+                        .on_press(AssetsMessage::SetRenameInput(Some((
+                            handle,
+                            path.name().to_string()
+                        ))),)
+                        .width(Fill),
+                    widgets::menu_item_button("Edit", None, Some(icons::EDIT))
+                        .on_press(AssetsMessage::EditAsset(handle))
+                        .width(Fill)
+                ]
+                .push_maybe(
+                    (!extra_options.is_empty()).then_some(horizontal_rule(8).style(
+                        |theme: &Theme| rule::Style {
+                            fill_mode: rule::FillMode::Padded(8),
+                            ..rule::default(theme)
+                        },
+                    )),
                 )
-                .width(Fill),
-                widgets::menu_button("Edit", AssetsMessage::EditAsset(handle)).width(Fill)
-            ])
+                .extend(extra_options),
+            )
             .padding(4)
             .width(200)
             .style(style::dropdown)

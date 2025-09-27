@@ -1,6 +1,6 @@
 use iced::border::Radius;
 use iced::gradient::{ColorStop, Linear};
-use iced::widget::{self, button, container, rule, slider};
+use iced::widget::{self, button, checkbox as iced_checkbox, container, rule, slider};
 use iced::{Background, Border, Color, Gradient, Radians, Shadow, Theme, Vector};
 use iced_aw::style::menu_bar;
 use palette::convert::FromColorUnclamped;
@@ -23,7 +23,7 @@ fn base_button(theme: &Theme, status: button::Status, accent: Color) -> button::
     let btn_bg_a = theme.palette().background;
 
     let btn_bg_b = if let Disabled = status {
-        palette.secondary.base.color
+        mix_colors(accent, btn_bg_a, 0.3)
     } else {
         accent
     };
@@ -88,17 +88,15 @@ fn base_button(theme: &Theme, status: button::Status, accent: Color) -> button::
         },
     ]));
 
-    let btn_text = if let Disabled = status {
-        palette.secondary.base.color
-    } else {
-        accent
-    };
-
-    let border_color = mix_colors(light, dark, 0.3);
+    let border_color = mix_colors(lighter, dark, 0.3);
 
     button::Style {
         background: Some(btn_bg.into()),
-        text_color: btn_text,
+        text_color: if let Disabled = status {
+            mix_colors(accent, border_color, 0.5)
+        } else {
+            accent
+        },
         border: Border {
             color: border_color,
             width: 2.0,
@@ -113,12 +111,7 @@ pub fn primary_button(theme: &Theme, status: button::Status) -> button::Style {
 }
 
 pub fn secondary_button(theme: &Theme, status: button::Status) -> button::Style {
-    let base = base_button(theme, status, theme.extended_palette().secondary.base.color);
-
-    button::Style {
-        text_color: theme.palette().text,
-        ..base
-    }
+    base_button(theme, status, theme.palette().text)
 }
 
 pub fn success_button(theme: &Theme, status: button::Status) -> button::Style {
@@ -228,6 +221,29 @@ pub fn text_input_inline(
         placeholder: palette.secondary.weak.color,
         value: palette.background.base.text,
         selection: palette.primary.base.color,
+    }
+}
+
+pub fn checkbox(theme: &Theme, status: iced_checkbox::Status) -> iced_checkbox::Style {
+    use iced_checkbox::*;
+
+    let btn_style = match status {
+        Status::Active { is_checked: true } => primary_button(theme, button::Status::Active),
+        Status::Active { is_checked: false } => secondary_button(theme, button::Status::Active),
+        Status::Hovered { is_checked: true } => primary_button(theme, button::Status::Hovered),
+        Status::Hovered { is_checked: false } => secondary_button(theme, button::Status::Hovered),
+        Status::Disabled { is_checked: true } => primary_button(theme, button::Status::Disabled),
+        Status::Disabled { is_checked: false } => secondary_button(theme, button::Status::Disabled),
+    };
+
+    Style {
+        background: btn_style.background.unwrap(),
+        icon_color: btn_style.text_color,
+        border: Border {
+            radius: Radius::new(4),
+            ..btn_style.border
+        },
+        text_color: None,
     }
 }
 

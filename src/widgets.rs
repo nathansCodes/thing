@@ -6,7 +6,8 @@ pub mod icons;
 
 pub use dialog::dialog;
 use iced::{
-    Alignment, Border, Element, Font,
+    Alignment::{self, Center},
+    Border, Color, Element, Font,
     Length::Fill,
     Padding, Theme,
     advanced::widget::Text,
@@ -23,7 +24,10 @@ use crate::{
     assets::{AssetsData, Character, Image, image::DEFAULT_IMAGE},
     notification::Notification,
     style,
-    widgets::graph::{Graph, GraphData, GraphNode},
+    widgets::{
+        graph::{Graph, GraphData, GraphNode},
+        icons::ICON_FONT,
+    },
 };
 
 pub fn base_button<'a, Message>(
@@ -32,37 +36,79 @@ pub fn base_button<'a, Message>(
     button(content).padding([4, 8]).style(style::primary_button)
 }
 
-pub fn menu_button<'a, Message>(label: &'a str, message: Message) -> button::Button<'a, Message> {
+pub fn icon_button<'a, Message>(codepoint: char) -> button::Button<'a, Message> {
+    button(text(codepoint).font(ICON_FONT))
+        .padding([4, 8])
+        .style(style::primary_button)
+}
+
+pub fn labeled_icon_button<'a, Message: 'a>(
+    icon_codepoint: char,
+    label: &'a str,
+) -> button::Button<'a, Message> {
     let mut font = Font::DEFAULT;
     font.weight = Weight::Medium;
 
-    base_button(text(label).align_y(Alignment::Center).size(15.0).font(font))
+    button(
+        row![
+            text(icon_codepoint).font(ICON_FONT),
+            text(label).font(font).size(15)
+        ]
+        .spacing(6),
+    )
+    .padding([4, 8])
+    .style(style::primary_button)
+}
+
+pub fn menu_button<'a, Message: 'a>(
+    label: &'a str,
+    message: Message,
+    icon: Option<char>,
+) -> button::Button<'a, Message, Theme> {
+    let mut font = Font::DEFAULT;
+    font.weight = Weight::Medium;
+
+    let content = row![]
+        .push_maybe(icon.map(|icon| text(icon).font(ICON_FONT).width(15)))
+        .push(text(label).align_y(Alignment::Center).size(15).font(font))
+        .spacing(6);
+
+    base_button(content)
         .on_press(message)
         .style(style::menu_button)
 }
 
 pub fn menu_item_button<'a, Message: 'a>(
-    label: &'a str,
+    label: impl Into<String>,
     flavor_text: Option<&'a str>,
-) -> button::Button<'a, Message> {
+    icon: Option<char>,
+) -> button::Button<'a, Message, Theme> {
     let mut font = Font::DEFAULT;
     font.weight = Weight::Medium;
 
-    base_button(
-        row![
-            text(label).align_y(Alignment::Center).size(15.0).font(font),
-            horizontal_space(),
-        ]
-        .push_maybe(flavor_text.map(|flavor_text| {
-            text(flavor_text)
-                .align_y(Alignment::Center)
-                .size(13.0)
-                .font(font)
-        }))
-        .align_y(Alignment::Center),
-    )
-    .width(Fill)
-    .style(style::menu_button)
+    let content = row![
+        text::<'a, Theme, iced::Renderer>(icon.unwrap_or(icons::CLOSE))
+            .font(ICON_FONT)
+            .color_maybe(icon.is_none().then_some(Color::TRANSPARENT))
+            .align_x(Center)
+            .width(15),
+        text(label.into())
+            .align_y(Alignment::Center)
+            .size(15)
+            .font(font),
+        horizontal_space(),
+    ]
+    .push_maybe(flavor_text.map(|flavor_text| {
+        text(flavor_text)
+            .align_y(Alignment::Center)
+            .size(13.0)
+            .font(font)
+    }))
+    .spacing(6);
+
+    base_button(content.align_y(Alignment::Center))
+        .width(Fill)
+        .style(style::menu_button)
 }
 
 pub fn notification(i: usize, notification: &Notification) -> Container<'_, Message> {
@@ -84,7 +130,7 @@ pub fn notification(i: usize, notification: &Notification) -> Container<'_, Mess
                 icons::close()
                     .align_y(Alignment::Center)
                     .align_x(Alignment::Center)
-                    .size(15.0)
+                    .size(15)
             )
             .style(style::notification_close_button(notification.severity))
             .width(25.0)
@@ -152,16 +198,9 @@ pub fn node<'a>(
                             .handle
                     )
                     .width(Fill)
-                    .height(Fill)
+                    .height(75)
                     .filter_method(image::FilterMethod::Nearest),
-                    opaque(
-                        column![
-                            text(chara.name.clone()).center().width(Fill),
-                            base_button("ahkdlfjs").on_press(Message::CharacterButtonPressed)
-                        ]
-                        .width(Fill)
-                        .spacing(5.0)
-                    ),
+                    opaque(text(chara.name.clone()).center().width(Fill)),
                 ]
                 .spacing(5.0),
             )
@@ -183,6 +222,7 @@ pub fn node<'a>(
             .into(),
     })
 }
+
 pub fn dropdown<'a, Message: Clone + 'a>(
     dropdown_open: bool,
     show_hide_dropdown: Message,
@@ -205,15 +245,10 @@ pub fn dropdown<'a, Message: Clone + 'a>(
 
     let overlay = mouse_area(
         container(column(options.map(|(icon, option_text, on_press)| {
-            button(
-                row![text(icon).font(icons::ICON_FONT), text(option_text.into())]
-                    .align_y(Alignment::Center)
-                    .spacing(6.0),
-            )
-            .style(style::menu_button)
-            .width(Fill)
-            .on_press(on_press)
-            .into()
+            menu_item_button(option_text.into(), None, Some(icon))
+                .width(Fill)
+                .on_press(on_press)
+                .into()
         })))
         .padding(4.0)
         .style(style::dropdown),

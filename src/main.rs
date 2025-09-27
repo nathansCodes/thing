@@ -1,6 +1,6 @@
 #[allow(unused)]
 mod assets;
-mod edit;
+mod inspector;
 mod notification;
 mod positioning_schemes;
 mod style;
@@ -8,7 +8,7 @@ mod widgets;
 
 use crate::assets::image::DEFAULT_IMAGE;
 use crate::assets::{Asset, AssetHandle, AssetKind, Character, io};
-use crate::edit::{EditMessage, EditPane};
+use crate::inspector::{Inspector, InspectorMessage};
 use crate::notification::Notification;
 use crate::widgets::dialog::{Dialog, DialogOption};
 use crate::widgets::dnd::{dnd_indicator, dnd_receiver};
@@ -71,7 +71,7 @@ fn main() -> iced::Result {
                             axis: pane_grid::Axis::Vertical,
                             ratio: 0.7,
                             a: Box::new(Configuration::Pane(Pane::Graph)),
-                            b: Box::new(Configuration::Pane(Pane::Edit)),
+                            b: Box::new(Configuration::Pane(Pane::Inspector)),
                         }),
                     }),
                     focus: None,
@@ -81,7 +81,7 @@ fn main() -> iced::Result {
                     dnd_payload: None,
                     dialog: None,
                     last_error: None,
-                    edit_pane: EditPane::default(),
+                    inspector: Inspector::default(),
                 },
                 Task::none(),
             )
@@ -110,13 +110,13 @@ struct State {
     dnd_payload: Option<Draggable>,
     dialog: Option<Dialog<Message>>,
     last_error: Option<anyhow::Error>,
-    edit_pane: EditPane,
+    inspector: Inspector,
 }
 
 enum Pane {
     Assets,
     Graph,
-    Edit,
+    Inspector,
 }
 
 #[allow(clippy::enum_variant_names)]
@@ -144,7 +144,6 @@ enum Message {
     PaneResized(pane_grid::ResizeEvent),
     GraphEvent(GraphEvent<RelativeAttachment<line_styles::AxisAligned>>),
     TraverseGraph,
-    CharacterButtonPressed,
     DismissNotification(usize),
     Tick,
     SetDragPayload(Option<Draggable>),
@@ -152,26 +151,46 @@ enum Message {
     CloseDialog,
     EscapePressed,
     NotifyError,
-    EditMessage(EditMessage),
+    InspectorMessage(InspectorMessage),
+    Undo,
+    Redo,
+}
+
+impl From<AssetsMessage> for Message {
+    fn from(value: AssetsMessage) -> Self {
+        Self::AssetsMessage(value)
+    }
+}
+
+impl From<InspectorMessage> for Message {
+    fn from(value: InspectorMessage) -> Self {
+        Self::InspectorMessage(value)
+    }
+}
+
+impl From<GraphEvent<RelativeAttachment<line_styles::AxisAligned>>> for Message {
+    fn from(value: GraphEvent<RelativeAttachment<line_styles::AxisAligned>>) -> Self {
+        Self::GraphEvent(value)
+    }
 }
 
 fn view(state: &State) -> Element<'_, Message> {
     #[rustfmt::skip]
     let menu_bar = menu_bar![
         (
-            menu_button("File", Message::MenuButtonPressed),
+            menu_button("File", Message::MenuButtonPressed, None),
             menu!(
-                (menu_item_button("Open Folder", Some("CTRL+O")).on_press(Message::OpenLoadFolderDialog))
-                (menu_item_button("Add Image", None).on_press(Message::OpenAddAssetDialog))
-                (menu_item_button("Save", Some("CTRL+S")).on_press(Message::Save))
+                (menu_item_button("Open Folder", Some("CTRL+O"), None).on_press(Message::OpenLoadFolderDialog))
+                (menu_item_button("Add Image", None, None).on_press(Message::OpenAddAssetDialog))
+                (menu_item_button("Save", Some("CTRL+S"), None).on_press(Message::Save))
             )
             .width(200.0)
             .spacing(2.0)
         )
         (
-            menu_button("Graph", Message::MenuButtonPressed),
+            menu_button("Graph", Message::MenuButtonPressed, None),
             menu!(
-                (menu_item_button("Select All", Some("CTRL+A")).on_press(Message::GraphEvent(GraphEvent::SelectAll)))
+                (menu_item_button("Select All", Some("CTRL+A"), None).on_press(Message::GraphEvent(GraphEvent::SelectAll)))
             )
             .width(200.0)
             .spacing(2.0)
@@ -189,7 +208,7 @@ fn view(state: &State) -> Element<'_, Message> {
                 text(match pane {
                     Pane::Assets => "Assets",
                     Pane::Graph => "Graph",
-                    Pane::Edit => "Edit",
+                    Pane::Inspector => "Inspector",
                 })
                 .size(15.0)
                 .font(title_bar_font),
@@ -208,7 +227,12 @@ fn view(state: &State) -> Element<'_, Message> {
                 Element::from(assets::view_controls(&state.assets).map(Message::AssetsMessage))
             }
             Pane::Graph => "".into(),
-            Pane::Edit => "".into(),
+            Pane::Inspector => Element::from(
+                state
+                    .inspector
+                    .view_controls()
+                    .map(Message::InspectorMessage),
+            ),
         })
         .height(40);
 
@@ -232,7 +256,7 @@ fn view(state: &State) -> Element<'_, Message> {
             Pane::Assets => container(assets::view(&state.assets).map(Message::AssetsMessage))
                 .padding(2)
                 .into(),
-            Pane::Edit => state.edit_pane.view(state).map(Message::EditMessage),
+            Pane::Inspector => state.inspector.view(state).map(Message::InspectorMessage),
         };
 
         let r1 = horizontal_rule(1).style(move |theme: &Theme| rule::Style {
@@ -343,7 +367,14 @@ fn view(state: &State) -> Element<'_, Message> {
 fn update(state: &mut State, message: Message) -> Task<Message> {
     match message {
         Message::AssetsMessage(assets_message) => match assets_message {
-            AssetsMessage::OpenAsset(handle) => {
+            AssetsMessage::OpenAsset(handle) => state
+                .inspector
+                .update(
+                    &mut state.assets,
+                    InspectorMessage::SetCurrent(handle, false),
+                )
+                .map(Message::InspectorMessage),
+            AssetsMessage::AddAssetToGraph(handle) => {
                 let Some(asset) = state.assets.get(handle) else {
                     return Task::none();
                 };
@@ -413,9 +444,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
 
                 Task::none()
             }
-            AssetsMessage::EditAsset(handle) => {
-                Task::done(Message::EditMessage(EditMessage::SetCurrent(handle)))
-            }
+            AssetsMessage::EditAsset(handle) => Task::batch([
+                Task::done(Message::from(InspectorMessage::SetCurrent(handle, true))),
+                Task::done(Message::from(InspectorMessage::EnterEditMode)),
+            ]),
             _ => assets::update(&mut state.assets, assets_message).map(Message::AssetsMessage),
         },
         Message::AddCharacter(chara, pos) => {
@@ -791,10 +823,6 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 .for_each(|(i, node)| println!("for_each {i}: {:?}", node.data()));
             Task::none()
         }
-        Message::CharacterButtonPressed => {
-            println!("pressd");
-            Task::none()
-        }
         Message::DismissNotification(i) => {
             state.notifications.remove(i);
 
@@ -813,7 +841,6 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::SetDragPayload(draggable) => {
             if !(state.dnd_payload.is_some() && draggable.is_some()) {
-                println!("dragging {:?}", draggable);
                 state.dnd_payload = draggable;
             }
             Task::none()
@@ -855,10 +882,26 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
 
             Task::none()
         }
-        Message::EditMessage(edit_message) => state
-            .edit_pane
+        Message::InspectorMessage(edit_message) => state
+            .inspector
             .update(&mut state.assets, edit_message)
-            .map(Message::EditMessage),
+            .map(Message::InspectorMessage),
+        Message::Undo => match state.focus.and_then(|id| state.panes.get(id)) {
+            None | Some(Pane::Graph) => Task::none(),
+            Some(Pane::Inspector) => state
+                .inspector
+                .update(&mut state.assets, InspectorMessage::Undo)
+                .map(Message::InspectorMessage),
+            Some(Pane::Assets) => Task::none(),
+        },
+        Message::Redo => match state.focus.and_then(|id| state.panes.get(id)) {
+            None | Some(Pane::Graph) => Task::none(),
+            Some(Pane::Inspector) => state
+                .inspector
+                .update(&mut state.assets, InspectorMessage::Redo)
+                .map(Message::InspectorMessage),
+            Some(Pane::Assets) => Task::none(),
+        },
     }
 }
 
@@ -876,6 +919,8 @@ fn subscription(_state: &State) -> Subscription<Message> {
             (Modifiers::CTRL, Key::Character(char)) if char.eq("f") => Some(
                 Message::AssetsMessage(AssetsMessage::QueryChanged(Some("".to_string()))),
             ),
+            (Modifiers::CTRL, Key::Character(char)) if char.eq("z") => Some(Message::Undo),
+            (Modifiers::CTRL, Key::Character(char)) if char.eq("y") => Some(Message::Redo),
             (_, Key::Named(Named::Escape)) if modifiers.is_empty() => Some(Message::EscapePressed),
             _ => None,
         }),
