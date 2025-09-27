@@ -1770,6 +1770,7 @@ dependencies = [
  "file_type",
  "iced",
  "iced_aw",
+ "itertools",
  "lazy_static",
  "lyon_algorithms",
  "palette",

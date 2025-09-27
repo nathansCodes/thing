@@ -224,6 +224,36 @@ pub fn text_input_inline(
     }
 }
 
+pub fn search_bar(theme: &Theme, status: widget::text_input::Status) -> widget::text_input::Style {
+    use widget::text_input::*;
+
+    let palette = theme.extended_palette();
+
+    let accent = match status {
+        Status::Active => palette.background.strong.color,
+        Status::Hovered => palette.primary.weak.color,
+        Status::Focused => palette.primary.base.color,
+        Status::Disabled => palette.secondary.base.color,
+    };
+
+    let bg_color = mix_colors(palette.background.base.color, accent, 0.05);
+
+    let bg = Gradient::Linear(
+        Linear::new(Radians::PI)
+            .add_stop(0.0, mix_colors(bg_color, Color::BLACK, 0.3))
+            .add_stop(0.25, bg_color),
+    );
+
+    Style {
+        background: bg.into(),
+        border: Border::default(),
+        icon: accent,
+        placeholder: palette.secondary.weak.color,
+        value: palette.background.base.text,
+        selection: palette.primary.base.color,
+    }
+}
+
 pub fn checkbox(theme: &Theme, status: iced_checkbox::Status) -> iced_checkbox::Style {
     use iced_checkbox::*;
 

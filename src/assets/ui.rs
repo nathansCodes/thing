@@ -11,7 +11,7 @@ use crate::{
 
 use iced::{
     Alignment, Element,
-    Length::{Fill, Shrink},
+    Length::{Fill, FillPortion, Shrink},
     Task, Theme,
     widget::{
         self, Rule, button, column, container, horizontal_rule, row, rule, scrollable, text,
@@ -107,8 +107,13 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
         AssetsMessage::EditAsset(handle) => Task::done(AssetsMessage::EditAsset(handle)),
         AssetsMessage::SetPayload(payload) => Task::done(AssetsMessage::SetPayload(payload)),
         AssetsMessage::QueryChanged(text) => {
-            state.query = text;
-            Task::none()
+            if !state.query_present() && text.is_some() {
+                state.query = text;
+                text_input::focus(state.search_bar.clone())
+            } else {
+                state.query = text;
+                Task::none()
+            }
         }
         AssetsMessage::ModeChanged(mode) => {
             state.mode = mode;
@@ -127,11 +132,16 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
             Task::none()
         }
         AssetsMessage::SetRenameInput(val) => {
-            state.renaming = val;
-            Task::none()
+            if state.rename_state.is_none() && val.is_some() {
+                state.rename_state = val;
+                text_input::focus(state.rename_input.clone())
+            } else {
+                state.rename_state = val;
+                Task::none()
+            }
         }
         AssetsMessage::RenameAsset => {
-            let Some((handle, new_name)) = state.renaming.take() else {
+            let Some((handle, mut new_name)) = state.rename_state.take() else {
                 return Task::none();
             };
 
@@ -139,7 +149,19 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
                 return Task::none();
             };
 
-            let new_path = AssetPath::new(old_path.kind(), new_name.clone() + old_path.extension());
+            new_name = new_name.trim().to_string();
+
+            if new_name.is_empty() {
+                return Task::none();
+            }
+
+            let extension = old_path.extension();
+
+            if new_name.ends_with(extension) {
+                new_name.truncate(new_name.len() - extension.len());
+            }
+
+            let new_path = old_path.kind() + (new_name.clone() + extension);
 
             state.index.insert(handle.0, new_path.clone());
 
@@ -162,7 +184,7 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
                     let asset = state.assets.remove(&old_path).unwrap();
                     state.assets.insert(new_path.clone(), asset);
 
-                    Task::none()
+                    Task::done(AssetsMessage::SetRenameInput(None))
                 }
                 Err(err) => {
                     state.last_error = Some(anyhow!(err).context(err_ctx));
@@ -184,15 +206,16 @@ pub fn image_item<'a>(
     state: &'a AssetsData,
     img: &'a Image,
 ) -> Element<'a, AssetsMessage> {
-    let rename_input = state.renaming.as_ref().and_then(|(rn_handle, input)| {
+    let rename_input = state.rename_state.as_ref().and_then(|(rn_handle, input)| {
         (*rn_handle == handle).then_some(
             text_input("Rename...", input.as_str())
                 .on_input(|input| AssetsMessage::SetRenameInput(Some((*rn_handle, input))))
-                .on_submit(AssetsMessage::RenameAsset),
+                .on_submit(AssetsMessage::RenameAsset)
+                .id(state.rename_input.clone()),
         )
     });
 
-    let name = path.name();
+    let name = path.file_name();
 
     match state.mode {
         Mode::Thumbnails => button(
@@ -203,7 +226,14 @@ pub fn image_item<'a>(
                     .filter_method(widget::image::FilterMethod::Nearest),
                 rename_input
                     .map(|ri| Element::from(ri.width(100.0).align_x(Alignment::Center)))
-                    .unwrap_or(text(name).width(100.0).center().into())
+                    .unwrap_or(
+                        text(name)
+                            .width(100.0)
+                            .center()
+                            .size(15)
+                            .wrapping(text::Wrapping::WordOrGlyph)
+                            .into()
+                    )
             ]
             .spacing(5.0)
             .padding(5.0),
@@ -371,18 +401,22 @@ pub fn view(state: &AssetsData) -> Element<'_, AssetsMessage> {
     });
 
     let search_bar = state.query.as_ref().map(|query| {
-        text_input("Search...", query)
-            .on_input(|input| AssetsMessage::QueryChanged(Some(input)))
-            .icon(text_input::Icon {
-                font: icons::ICON_FONT,
-                code_point: icons::SEARCH,
-                size: None,
-                spacing: 4.0,
-                side: text_input::Side::Right,
-            })
-            .width(Fill)
-            .padding(4)
-            .style(style::text_input)
+        column![
+            text_input("Search...", query)
+                .on_input(|input| AssetsMessage::QueryChanged(Some(input)))
+                .icon(text_input::Icon {
+                    font: icons::ICON_FONT,
+                    code_point: icons::SEARCH,
+                    size: None,
+                    spacing: 4.0,
+                    side: text_input::Side::Right,
+                })
+                .width(Fill)
+                .padding([4, 6])
+                .style(style::search_bar)
+                .id(state.search_bar.clone()),
+            horizontal_rule(1)
+        ]
     });
 
     let layout = match state.mode {

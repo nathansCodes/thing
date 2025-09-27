@@ -6,6 +6,7 @@ mod ui;
 
 pub use asset_path::AssetPath;
 pub use character::Character;
+use iced::widget::text_input;
 pub use image::Image;
 use ron::ser::PrettyConfig;
 pub use ui::{update, view, view_controls};
@@ -119,7 +120,6 @@ pub enum Mode {
     List,
 }
 
-#[derive(Default)]
 pub struct AssetsData {
     view: AssetKind,
     mode: Mode,
@@ -128,9 +128,30 @@ pub struct AssetsData {
     index: HashMap<u32, AssetPath>,
     last_error: Option<anyhow::Error>,
     query: Option<String>,
+    search_bar: text_input::Id,
     folder: Option<PathBuf>,
-    renaming: Option<(AssetHandle, String)>,
+    rename_state: Option<(AssetHandle, String)>,
+    rename_input: text_input::Id,
     view_dropdown_open: bool,
+}
+
+impl Default for AssetsData {
+    fn default() -> Self {
+        Self {
+            view: Default::default(),
+            mode: Default::default(),
+            mode_dropdown_open: Default::default(),
+            assets: Default::default(),
+            index: Default::default(),
+            last_error: Default::default(),
+            query: Default::default(),
+            search_bar: text_input::Id::unique(),
+            folder: Default::default(),
+            rename_state: Default::default(),
+            rename_input: text_input::Id::unique(),
+            view_dropdown_open: Default::default(),
+        }
+    }
 }
 
 impl Index<AssetHandle> for AssetsData {
@@ -266,7 +287,7 @@ impl AssetsData {
     }
 
     pub fn is_renaming(&self) -> bool {
-        self.renaming.is_some()
+        self.rename_state.is_some()
     }
 
     fn iter(&self) -> impl Iterator<Item = (&u32, &AssetPath, &Asset)> {

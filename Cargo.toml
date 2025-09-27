@@ -22,6 +22,7 @@ iced_aw = { version = "0.12.2", features = [
     "grid",
     "tab_bar",
 ] }
+itertools = "0.14.0"
 lazy_static = "1.5.0"
 lyon_algorithms = "1.0.5"
 palette = "0.7.6"
