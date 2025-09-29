@@ -35,7 +35,7 @@ fn base_button(theme: &Theme, status: button::Status, accent: Color) -> button::
         Disabled => 0.1,
     };
 
-    let dark = mix_colors(btn_bg_a, btn_bg_b, dark_t);
+    let dark = mix_colors(btn_bg_a, btn_bg_b, dark_t).scale_alpha(0.5);
 
     let darker_t = match status {
         Active => 0.225,
@@ -44,30 +44,39 @@ fn base_button(theme: &Theme, status: button::Status, accent: Color) -> button::
         Disabled => 0.075,
     };
 
-    let darker = mix_colors(btn_bg_a, btn_bg_b, darker_t);
+    let darker = mix_colors(btn_bg_a, btn_bg_b, darker_t).scale_alpha(0.7);
 
     let light_t = match status {
-        Active => 0.5,
-        Hovered => 0.5,
-        Pressed => 0.45,
-        Disabled => 0.4,
+        Active => 0.55,
+        Hovered => 0.55,
+        Pressed => 0.5,
+        Disabled => 0.45,
     };
 
-    let light = mix_colors(btn_bg_a, btn_bg_b, light_t);
+    let light = mix_colors(btn_bg_a, btn_bg_b, light_t).scale_alpha(0.9);
+
+    let lighter_t = match status {
+        Active => 0.075,
+        Hovered => 0.2,
+        Pressed => 0.125,
+        Disabled => 0.025,
+    };
 
     let lighter = mix_colors(
-        light,
-        palette.background.base.text,
-        if let Hovered = status { 0.25 } else { 0.075 },
+        mix_colors(light, Color::WHITE, 0.075),
+        palette.background.base.text.scale_alpha(0.9),
+        lighter_t,
     );
+
+    let lightmid = mix_colors(light, lighter, 0.5);
 
     let btn_bg = Gradient::Linear(Linear::new(Radians::from(0.0)).add_stops([
         ColorStop {
             offset: 0.0,
-            color: light,
+            color: mix_colors(light, dark, 0.3),
         },
         ColorStop {
-            offset: 0.15,
+            offset: 0.2,
             color: dark,
         },
         ColorStop {
@@ -80,7 +89,7 @@ fn base_button(theme: &Theme, status: button::Status, accent: Color) -> button::
         },
         ColorStop {
             offset: 0.625,
-            color: light,
+            color: lightmid,
         },
         ColorStop {
             offset: 0.9,
@@ -88,7 +97,7 @@ fn base_button(theme: &Theme, status: button::Status, accent: Color) -> button::
         },
     ]));
 
-    let border_color = mix_colors(lighter, dark, 0.3);
+    let border_color = lighter.scale_alpha(0.9);
 
     button::Style {
         background: Some(btn_bg.into()),
