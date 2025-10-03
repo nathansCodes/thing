@@ -11,12 +11,17 @@ pub use image::Image;
 use ron::ser::PrettyConfig;
 pub use ui::{update, view, view_controls};
 
-use std::{collections::HashMap, ops::Index, path::PathBuf, str::FromStr};
+use std::{
+    collections::HashMap,
+    ops::Index,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-use crate::assets::io::AssetsError;
+use crate::assets::io::{AssetsError, load_dir};
 
 #[derive(Debug, Clone)]
 pub enum Asset {
@@ -133,6 +138,7 @@ pub struct AssetsData {
     rename_state: Option<(AssetHandle, String)>,
     rename_input: text_input::Id,
     view_dropdown_open: bool,
+    failed_loads: Vec<(AssetHandle, anyhow::Error)>,
 }
 
 impl Default for AssetsData {
@@ -150,6 +156,7 @@ impl Default for AssetsData {
             rename_state: Default::default(),
             rename_input: text_input::Id::unique(),
             view_dropdown_open: Default::default(),
+            failed_loads: Vec::new(),
         }
     }
 }
@@ -290,6 +297,73 @@ impl AssetsData {
         self.rename_state.is_some()
     }
 
+    pub fn failed_loads(&self) -> &Vec<(AssetHandle, anyhow::Error)> {
+        &self.failed_loads
+    }
+
+    fn load(&mut self, path: &Path) -> Result<HashMap<u32, (AssetPath, Result<Asset>)>> {
+        let ctx = |err: &'static str| format!("Failed while loading directory at {path:?}: {err}");
+
+        if !path.is_dir() {
+            return Err(anyhow!(std::io::ErrorKind::NotADirectory))
+                .context(ctx("Path is not a dirctory"));
+        }
+
+        if !path.exists() {
+            std::fs::create_dir(path).context(ctx("Couldn't create directory"))?;
+            return Err(anyhow!(std::io::ErrorKind::NotFound));
+        }
+
+        load_dir(path).context(format!("Couldn't load {path:?}"))
+    }
+
+    fn rename(&mut self, asset_handle: AssetHandle, mut new_name: String) -> Result<()> {
+        let old_path = self
+            .index
+            .get(&asset_handle.0)
+            .cloned()
+            .ok_or(AssetsError::InvalidAsset)
+            .context(format!(
+                "Can't rename asset because it doesn't exist: {asset_handle:?}"
+            ))?;
+
+        new_name = new_name.trim().to_string();
+
+        if new_name.is_empty() {
+            return Err(anyhow!(std::io::ErrorKind::InvalidFilename));
+        }
+
+        let extension = old_path.extension();
+
+        if new_name.ends_with(extension) {
+            new_name.truncate(new_name.len() - extension.len());
+        }
+
+        let new_path = old_path.kind() + (new_name.clone() + extension);
+
+        self.index.insert(asset_handle.0, new_path.clone());
+
+        let folder = self.folder.clone().unwrap();
+
+        let from = folder.clone() + old_path.clone();
+
+        let to = folder + new_path.clone();
+
+        let err_ctx = format!("Couldn't rename {from:?} to {to:?}");
+
+        std::fs::rename(from, to).map_err(|err| anyhow!(err).context(err_ctx.clone()))?;
+
+        match self.write_index() {
+            Ok(_) => {
+                let asset = self.assets.remove(&old_path).unwrap();
+                self.assets.insert(new_path.clone(), asset);
+
+                Ok(())
+            }
+            Err(err) => Err(anyhow!(err).context(err_ctx)),
+        }
+    }
+
     fn iter(&self) -> impl Iterator<Item = (&u32, &AssetPath, &Asset)> {
         self.index.iter().filter_map(|(id, asset_path)| {
             self.assets
@@ -303,6 +377,7 @@ impl AssetsData {
 pub enum AssetsMessage {
     LoadAssets(PathBuf),
     LoadCompleted(PathBuf, HashMap<u32, (AssetPath, Asset)>),
+    LoadPartiallyFailed(std::path::PathBuf, HashMap<u32, (AssetPath, Asset)>),
     LoadFailed,
     OpenAsset(AssetHandle),
     EditAsset(AssetHandle),

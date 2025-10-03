@@ -25,66 +25,38 @@ use anyhow::{Result, anyhow};
 pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMessage> {
     match message {
         AssetsMessage::LoadAssets(path) => {
-            if !path.is_dir() {
-                return Task::none();
-            }
+            //state.last_error = Some(anyhow!(err).context(format!("Couldn't create {path:?}")));
 
-            if !path.exists()
-                && let Err(err) = std::fs::create_dir(path.clone())
-            {
-                state.last_error = Some(anyhow!(err).context(format!("Couldn't create {path:?}")));
-                return Task::done(AssetsMessage::LoadFailed);
-            }
+            match state.load(&path) {
+                Ok(assets) => {
+                    #[allow(clippy::type_complexity)]
+                    let (succeeded, failed): (HashMap<_, _>, _) =
+                        assets.into_iter().partition(|(_, (_, res))| res.is_ok());
 
-            if !path.is_dir() {
-                state.last_error = Some(
-                    anyhow!(io::Error::from(io::ErrorKind::AlreadyExists))
-                        .context(format!("Couldn't create {path:?}")),
-                );
-                Task::done(AssetsMessage::LoadFailed)
-            } else {
-                match load_dir(&path) {
-                    Ok(files) => {
-                        let (succeeded, failed) = {
-                            #[allow(clippy::type_complexity)]
-                            let (succeeded, failed): (
-                                HashMap<u32, (AssetPath, Result<Asset>)>,
-                                HashMap<u32, (AssetPath, Result<Asset>)>,
-                            ) = files.into_iter().partition(|(_, (_, res))| res.is_ok());
+                    let succeeded = succeeded
+                        .into_iter()
+                        .map(|(id, (asset_path, res))| (id, (asset_path, res.unwrap())));
 
-                            let succeeded = succeeded
-                                .into_iter()
-                                .map(|(id, (asset_path, res))| (id, (asset_path, res.unwrap())))
-                                .collect();
+                    let failed = failed
+                        .into_iter()
+                        .map(|(id, (asset_path, res))| (AssetHandle(id), res.unwrap_err()))
+                        .collect::<Vec<_>>();
 
-                            let failed = failed
-                                .into_iter()
-                                .map(|(id, (asset_path, res))| (id, asset_path, res.unwrap_err()));
+                    if failed.is_empty() {
+                        Task::done(AssetsMessage::LoadCompleted(path, succeeded.collect()))
+                    } else {
+                        state.failed_loads = failed;
 
-                            (succeeded, failed)
-                        };
-
-                        let failed_messages = failed.into_iter().map(|(id, asset_path, err)| {
-                            state.last_error = Some(
-                                err.context(format!("Couldn't load asset {asset_path} ({id})")),
-                            );
-
-                            AssetsMessage::LoadAssetFailed(id, asset_path)
-                        });
-
-                        Task::batch(
-                            std::iter::once(AssetsMessage::LoadCompleted(path, succeeded))
-                                .chain(failed_messages)
-                                .map(Task::done),
-                        )
+                        Task::done(AssetsMessage::LoadPartiallyFailed(
+                            path,
+                            succeeded.collect(),
+                        ))
                     }
-                    Err(err) => {
-                        println!("{err}");
-                        state.last_error =
-                            Some(anyhow!(err).context(format!("Couldn't load {path:?}")));
+                }
+                Err(err) => {
+                    state.last_error = Some(err);
 
-                        Task::done(AssetsMessage::LoadFailed)
-                    }
+                    Task::done(AssetsMessage::LoadFailed)
                 }
             }
         }
@@ -95,6 +67,9 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
             }
 
             Task::none()
+        }
+        AssetsMessage::LoadPartiallyFailed(path, succeeded) => {
+            Task::done(AssetsMessage::LoadCompleted(path, succeeded))
         }
         AssetsMessage::LoadFailed => {
             if let Some(err) = &state.last_error {
@@ -141,53 +116,14 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
             }
         }
         AssetsMessage::RenameAsset => {
-            let Some((handle, mut new_name)) = state.rename_state.take() else {
+            let Some((handle, new_name)) = state.rename_state.take() else {
                 return Task::none();
             };
 
-            let Some(old_path) = state.index.get(&handle.0).cloned() else {
-                return Task::none();
-            };
-
-            new_name = new_name.trim().to_string();
-
-            if new_name.is_empty() {
-                return Task::none();
-            }
-
-            let extension = old_path.extension();
-
-            if new_name.ends_with(extension) {
-                new_name.truncate(new_name.len() - extension.len());
-            }
-
-            let new_path = old_path.kind() + (new_name.clone() + extension);
-
-            state.index.insert(handle.0, new_path.clone());
-
-            let folder = state.folder.clone().unwrap();
-
-            let from = folder.clone() + old_path.clone();
-
-            let to = folder + new_path.clone();
-
-            let err_ctx = format!("Couldn't rename {from:?} to {to:?}");
-
-            if let Err(err) = std::fs::rename(from, to) {
-                state.last_error = Some(anyhow!(err).context(err_ctx));
-
-                return Task::done(AssetsMessage::RenameAssetFailed(handle));
-            };
-
-            match state.write_index() {
-                Ok(_) => {
-                    let asset = state.assets.remove(&old_path).unwrap();
-                    state.assets.insert(new_path.clone(), asset);
-
-                    Task::done(AssetsMessage::SetRenameInput(None))
-                }
+            match state.rename(handle, new_name) {
+                Ok(_) => Task::none(),
                 Err(err) => {
-                    state.last_error = Some(anyhow!(err).context(err_ctx));
+                    state.last_error = Some(err);
 
                     Task::done(AssetsMessage::RenameAssetFailed(handle))
                 }

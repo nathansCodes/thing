@@ -1,6 +1,6 @@
 use crate::assets::{AsBytes, Asset, AssetKind, AssetPath, AssetsData};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use file_type::FileType;
 use iced::advanced::{graphics::image::image_rs::ImageFormat, image};
 use ron::ser::PrettyConfig;

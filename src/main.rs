@@ -423,6 +423,24 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             )
             .map(Message::AssetsMessage)
             .chain(Task::done(Message::LoadData(path))),
+            AssetsMessage::LoadPartiallyFailed(path, succeeded) => {
+                for (handle, err) in state.assets.failed_loads() {
+                    let Some(path) = state.assets.path(*handle) else {
+                        continue;
+                    };
+
+                    state.notifications.push(Notification::error(
+                        "Failed to load asset.",
+                        format!("Couldn't load {path}: {err}"),
+                    ));
+                }
+
+                assets::update(
+                    &mut state.assets,
+                    AssetsMessage::LoadPartiallyFailed(path, succeeded),
+                )
+                .map(Message::AssetsMessage)
+            }
             AssetsMessage::SetPayload(payload) => Task::done(Message::SetDragPayload(payload)),
             AssetsMessage::RenameAssetFailed(_) => {
                 if let Some(err) = state.assets.last_error() {
