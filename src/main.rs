@@ -253,7 +253,7 @@ fn view(state: &State) -> Element<'_, Message> {
 
         let content = match pane {
             Pane::Graph => view_graph(state),
-            Pane::Assets => container(assets::view(&state.assets).map(Message::AssetsMessage))
+            Pane::Assets => container(state.assets.view().map(Message::AssetsMessage))
                 .padding(2)
                 .into(),
             Pane::Inspector => state.inspector.view(state).map(Message::InspectorMessage),
@@ -414,15 +414,16 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             AssetsMessage::LoadAssets(path) => {
                 state.assets.set_folder(path.clone());
-                assets::update(&mut state.assets, AssetsMessage::LoadAssets(path.clone()))
+                state
+                    .assets
+                    .update(AssetsMessage::LoadAssets(path.clone()))
                     .map(Message::AssetsMessage)
             }
-            AssetsMessage::LoadCompleted(path, data) => assets::update(
-                &mut state.assets,
-                AssetsMessage::LoadCompleted(path.clone(), data),
-            )
-            .map(Message::AssetsMessage)
-            .chain(Task::done(Message::LoadData(path))),
+            AssetsMessage::LoadCompleted(path, data) => state
+                .assets
+                .update(AssetsMessage::LoadCompleted(path.clone(), data))
+                .map(Message::AssetsMessage)
+                .chain(Task::done(Message::LoadData(path))),
             AssetsMessage::LoadPartiallyFailed(path, succeeded) => {
                 for (handle, err) in state.assets.failed_loads() {
                     let Some(path) = state.assets.path(*handle) else {
@@ -435,11 +436,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     ));
                 }
 
-                assets::update(
-                    &mut state.assets,
-                    AssetsMessage::LoadPartiallyFailed(path, succeeded),
-                )
-                .map(Message::AssetsMessage)
+                state
+                    .assets
+                    .update(AssetsMessage::LoadPartiallyFailed(path, succeeded))
+                    .map(Message::AssetsMessage)
             }
             AssetsMessage::SetPayload(payload) => Task::done(Message::SetDragPayload(payload)),
             AssetsMessage::RenameAssetFailed(_) => {
@@ -466,7 +466,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 Task::done(Message::from(InspectorMessage::SetCurrent(handle, true))),
                 Task::done(Message::from(InspectorMessage::EnterEditMode)),
             ]),
-            _ => assets::update(&mut state.assets, assets_message).map(Message::AssetsMessage),
+            _ => state
+                .assets
+                .update(assets_message)
+                .map(Message::AssetsMessage),
         },
         Message::AddCharacter(chara, pos) => {
             state.nodes.add(Node::Character(chara), pos);

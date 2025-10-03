@@ -9,7 +9,7 @@ pub use character::Character;
 use iced::widget::text_input;
 pub use image::Image;
 use ron::ser::PrettyConfig;
-pub use ui::{update, view, view_controls};
+pub use ui::view_controls;
 
 use std::{
     collections::HashMap,

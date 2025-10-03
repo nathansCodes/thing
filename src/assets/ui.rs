@@ -22,12 +22,10 @@ use iced_aw::ContextMenu;
 
 use anyhow::{Result, anyhow};
 
-pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMessage> {
-    match message {
-        AssetsMessage::LoadAssets(path) => {
-            //state.last_error = Some(anyhow!(err).context(format!("Couldn't create {path:?}")));
-
-            match state.load(&path) {
+impl AssetsData {
+    pub fn update(&mut self, message: AssetsMessage) -> Task<AssetsMessage> {
+        match message {
+            AssetsMessage::LoadAssets(path) => match self.load(&path) {
                 Ok(assets) => {
                     #[allow(clippy::type_complexity)]
                     let (succeeded, failed): (HashMap<_, _>, _) =
@@ -45,7 +43,7 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
                     if failed.is_empty() {
                         Task::done(AssetsMessage::LoadCompleted(path, succeeded.collect()))
                     } else {
-                        state.failed_loads = failed;
+                        self.failed_loads = failed;
 
                         Task::done(AssetsMessage::LoadPartiallyFailed(
                             path,
@@ -54,84 +52,185 @@ pub fn update(state: &mut AssetsData, message: AssetsMessage) -> Task<AssetsMess
                     }
                 }
                 Err(err) => {
-                    state.last_error = Some(err);
+                    self.last_error = Some(err);
 
                     Task::done(AssetsMessage::LoadFailed)
                 }
-            }
-        }
-        AssetsMessage::LoadCompleted(_, assets) => {
-            for (id, (asset_path, asset)) in assets.into_iter() {
-                state.index.insert(id, asset_path.clone());
-                state.assets.insert(asset_path, asset);
-            }
+            },
+            AssetsMessage::LoadCompleted(_, assets) => {
+                for (id, (asset_path, asset)) in assets.into_iter() {
+                    self.index.insert(id, asset_path.clone());
+                    self.assets.insert(asset_path, asset);
+                }
 
-            Task::none()
-        }
-        AssetsMessage::LoadPartiallyFailed(path, succeeded) => {
-            Task::done(AssetsMessage::LoadCompleted(path, succeeded))
-        }
-        AssetsMessage::LoadFailed => {
-            if let Some(err) = &state.last_error {
-                println!("{err:#}");
-            }
-
-            Task::none()
-        }
-        AssetsMessage::OpenAsset(handle) => Task::done(AssetsMessage::OpenAsset(handle)),
-        AssetsMessage::EditAsset(handle) => Task::done(AssetsMessage::EditAsset(handle)),
-        AssetsMessage::SetPayload(payload) => Task::done(AssetsMessage::SetPayload(payload)),
-        AssetsMessage::QueryChanged(text) => {
-            if !state.query_present() && text.is_some() {
-                state.query = text;
-                text_input::focus(state.search_bar.clone())
-            } else {
-                state.query = text;
                 Task::none()
             }
-        }
-        AssetsMessage::ModeChanged(mode) => {
-            state.mode = mode;
-            Task::none()
-        }
-        AssetsMessage::ViewChanged(view) => {
-            state.view = view;
-            Task::none()
-        }
-        AssetsMessage::ShowHideModeDropdown => {
-            state.mode_dropdown_open = !state.mode_dropdown_open;
-            Task::none()
-        }
-        AssetsMessage::ShowHideViewDropdown => {
-            state.view_dropdown_open = !state.view_dropdown_open;
-            Task::none()
-        }
-        AssetsMessage::SetRenameInput(val) => {
-            if state.rename_state.is_none() && val.is_some() {
-                state.rename_state = val;
-                text_input::focus(state.rename_input.clone())
-            } else {
-                state.rename_state = val;
+            AssetsMessage::LoadPartiallyFailed(path, succeeded) => {
+                Task::done(AssetsMessage::LoadCompleted(path, succeeded))
+            }
+            AssetsMessage::LoadFailed => {
+                if let Some(err) = &self.last_error {
+                    println!("{err:#}");
+                }
+
                 Task::none()
             }
-        }
-        AssetsMessage::RenameAsset => {
-            let Some((handle, new_name)) = state.rename_state.take() else {
-                return Task::none();
-            };
-
-            match state.rename(handle, new_name) {
-                Ok(_) => Task::none(),
-                Err(err) => {
-                    state.last_error = Some(err);
-
-                    Task::done(AssetsMessage::RenameAssetFailed(handle))
+            AssetsMessage::OpenAsset(handle) => Task::done(AssetsMessage::OpenAsset(handle)),
+            AssetsMessage::EditAsset(handle) => Task::done(AssetsMessage::EditAsset(handle)),
+            AssetsMessage::SetPayload(payload) => Task::done(AssetsMessage::SetPayload(payload)),
+            AssetsMessage::QueryChanged(text) => {
+                if !self.query_present() && text.is_some() {
+                    self.query = text;
+                    text_input::focus(self.search_bar.clone())
+                } else {
+                    self.query = text;
+                    Task::none()
                 }
             }
+            AssetsMessage::ModeChanged(mode) => {
+                self.mode = mode;
+                Task::none()
+            }
+            AssetsMessage::ViewChanged(view) => {
+                self.view = view;
+                Task::none()
+            }
+            AssetsMessage::ShowHideModeDropdown => {
+                self.mode_dropdown_open = !self.mode_dropdown_open;
+                Task::none()
+            }
+            AssetsMessage::ShowHideViewDropdown => {
+                self.view_dropdown_open = !self.view_dropdown_open;
+                Task::none()
+            }
+            AssetsMessage::SetRenameInput(val) => {
+                if self.rename_state.is_none() && val.is_some() {
+                    self.rename_state = val;
+                    text_input::focus(self.rename_input.clone())
+                } else {
+                    self.rename_state = val;
+                    Task::none()
+                }
+            }
+            AssetsMessage::RenameAsset => {
+                let Some((handle, new_name)) = self.rename_state.take() else {
+                    return Task::none();
+                };
+
+                match self.rename(handle, new_name) {
+                    Ok(_) => Task::none(),
+                    Err(err) => {
+                        self.last_error = Some(err);
+
+                        Task::done(AssetsMessage::RenameAssetFailed(handle))
+                    }
+                }
+            }
+            AssetsMessage::RenameAssetFailed(..) => Task::none(),
+            AssetsMessage::LoadAssetFailed(..) => Task::none(),
+            AssetsMessage::AddAssetToGraph(_) => Task::none(),
         }
-        AssetsMessage::RenameAssetFailed(..) => Task::none(),
-        AssetsMessage::LoadAssetFailed(..) => Task::none(),
-        AssetsMessage::AddAssetToGraph(_) => Task::none(),
+    }
+
+    pub fn view(&self) -> Element<'_, AssetsMessage> {
+        let mut images: Vec<_> = self
+            .index
+            .iter()
+            .filter_map(|(id, asset_path)| {
+                self.assets.get(asset_path).and_then(|asset| {
+                    let path_str = asset_path.to_string().to_lowercase();
+
+                    (path_str.starts_with(self.view.folder())
+                        && path_str.contains(&self.query().to_lowercase()))
+                    .then_some(())
+                    .and_then(|_| match asset {
+                        Asset::Image(img) => Some(img),
+                        Asset::Character(character) => self.get_direct::<Image>(character.img),
+                    })
+                    .map(|img| (*id, asset_path, img))
+                })
+            })
+            .collect();
+
+        images.sort_by(|a, b| a.1.to_string().cmp(&b.1.to_string()));
+
+        let images =
+            images.into_iter().enumerate().map(|(i, (id, path, img))| {
+                let handle = AssetHandle(id);
+                let img_element = dnd_provider(
+                    AssetsMessage::SetPayload,
+                    crate::Draggable::Asset(handle),
+                    image_item(i, handle, path, self, img),
+                );
+
+                ContextMenu::new(img_element, move || {
+                    let extra_options = match path.kind() {
+                        AssetKind::Image => vec![],
+                        AssetKind::Character => vec![
+                            widgets::menu_item_button("Add to Graph", None, None)
+                                .on_press(AssetsMessage::AddAssetToGraph(AssetHandle(id)))
+                                .width(Fill)
+                                .into(),
+                        ],
+                    };
+
+                    container(
+                        column![
+                            widgets::menu_item_button("Rename", None, Some(icons::RENAME),)
+                                .on_press(AssetsMessage::SetRenameInput(Some((
+                                    handle,
+                                    path.name().to_string()
+                                ))),)
+                                .width(Fill),
+                            widgets::menu_item_button("Edit", None, Some(icons::EDIT))
+                                .on_press(AssetsMessage::EditAsset(handle))
+                                .width(Fill)
+                        ]
+                        .push_maybe((!extra_options.is_empty()).then_some(
+                            horizontal_rule(8).style(|theme: &Theme| rule::Style {
+                                fill_mode: rule::FillMode::Padded(8),
+                                ..rule::default(theme)
+                            }),
+                        ))
+                        .extend(extra_options),
+                    )
+                    .padding(4)
+                    .width(200)
+                    .style(style::dropdown)
+                    .into()
+                })
+                .into()
+            });
+
+        let search_bar = self.query.as_ref().map(|query| {
+            column![
+                text_input("Search...", query)
+                    .on_input(|input| AssetsMessage::QueryChanged(Some(input)))
+                    .icon(text_input::Icon {
+                        font: icons::ICON_FONT,
+                        code_point: icons::SEARCH,
+                        size: None,
+                        spacing: 4.0,
+                        side: text_input::Side::Right,
+                    })
+                    .width(Fill)
+                    .padding([4, 6])
+                    .style(style::search_bar)
+                    .id(self.search_bar.clone()),
+                horizontal_rule(1)
+            ]
+        });
+
+        let layout = match self.mode {
+            Mode::Thumbnails => Element::from(row(images).spacing(5).padding(3).width(Fill).wrap()),
+            Mode::List => Element::from(column(images).spacing(2).width(Fill)),
+        };
+
+        let content = column![]
+            .push_maybe(search_bar)
+            .push(scrollable(layout).style(style::scrollable));
+
+        content.into()
     }
 }
 
@@ -263,106 +362,4 @@ pub fn view_controls(state: &AssetsData) -> Element<'_, AssetsMessage> {
     })
     .width(Shrink)
     .into()
-}
-
-pub fn view(state: &AssetsData) -> Element<'_, AssetsMessage> {
-    let mut images: Vec<_> = state
-        .index
-        .iter()
-        .filter_map(|(id, asset_path)| {
-            state.assets.get(asset_path).and_then(|asset| {
-                let path_str = asset_path.to_string().to_lowercase();
-
-                (path_str.starts_with(state.view.folder())
-                    && path_str.contains(&state.query().to_lowercase()))
-                .then_some(())
-                .and_then(|_| match asset {
-                    Asset::Image(img) => Some(img),
-                    Asset::Character(character) => state.get_direct::<Image>(character.img),
-                })
-                .map(|img| (*id, asset_path, img))
-            })
-        })
-        .collect();
-
-    images.sort_by(|a, b| a.1.to_string().cmp(&b.1.to_string()));
-
-    let images = images.into_iter().enumerate().map(|(i, (id, path, img))| {
-        let handle = AssetHandle(id);
-        let img_element = dnd_provider(
-            AssetsMessage::SetPayload,
-            crate::Draggable::Asset(handle),
-            image_item(i, handle, path, state, img),
-        );
-
-        ContextMenu::new(img_element, move || {
-            let extra_options = match path.kind() {
-                AssetKind::Image => vec![],
-                AssetKind::Character => vec![
-                    widgets::menu_item_button("Add to Graph", None, None)
-                        .on_press(AssetsMessage::AddAssetToGraph(AssetHandle(id)))
-                        .width(Fill)
-                        .into(),
-                ],
-            };
-
-            container(
-                column![
-                    widgets::menu_item_button("Rename", None, Some(icons::RENAME),)
-                        .on_press(AssetsMessage::SetRenameInput(Some((
-                            handle,
-                            path.name().to_string()
-                        ))),)
-                        .width(Fill),
-                    widgets::menu_item_button("Edit", None, Some(icons::EDIT))
-                        .on_press(AssetsMessage::EditAsset(handle))
-                        .width(Fill)
-                ]
-                .push_maybe(
-                    (!extra_options.is_empty()).then_some(horizontal_rule(8).style(
-                        |theme: &Theme| rule::Style {
-                            fill_mode: rule::FillMode::Padded(8),
-                            ..rule::default(theme)
-                        },
-                    )),
-                )
-                .extend(extra_options),
-            )
-            .padding(4)
-            .width(200)
-            .style(style::dropdown)
-            .into()
-        })
-        .into()
-    });
-
-    let search_bar = state.query.as_ref().map(|query| {
-        column![
-            text_input("Search...", query)
-                .on_input(|input| AssetsMessage::QueryChanged(Some(input)))
-                .icon(text_input::Icon {
-                    font: icons::ICON_FONT,
-                    code_point: icons::SEARCH,
-                    size: None,
-                    spacing: 4.0,
-                    side: text_input::Side::Right,
-                })
-                .width(Fill)
-                .padding([4, 6])
-                .style(style::search_bar)
-                .id(state.search_bar.clone()),
-            horizontal_rule(1)
-        ]
-    });
-
-    let layout = match state.mode {
-        Mode::Thumbnails => Element::from(row(images).spacing(5).padding(3).width(Fill).wrap()),
-        Mode::List => Element::from(column(images).spacing(2).width(Fill)),
-    };
-
-    let content = column![]
-        .push_maybe(search_bar)
-        .push(scrollable(layout).style(style::scrollable));
-
-    content.into()
 }
