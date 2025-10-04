@@ -2,14 +2,11 @@ mod asset_path;
 mod character;
 pub mod image;
 pub mod io;
-mod ui;
 
 pub use asset_path::AssetPath;
 pub use character::Character;
-use iced::widget::text_input;
 pub use image::Image;
 use ron::ser::PrettyConfig;
-pub use ui::view_controls;
 
 use std::{
     collections::HashMap,
@@ -21,7 +18,7 @@ use std::{
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-use crate::assets::io::{AssetsError, load_dir};
+use io::{AssetsError, load_dir};
 
 #[derive(Debug, Clone)]
 pub enum Asset {
@@ -118,47 +115,12 @@ impl std::fmt::Display for AssetKind {
     }
 }
 
-#[derive(Default, Debug, Clone, Copy)]
-pub enum Mode {
-    #[default]
-    Thumbnails,
-    List,
-}
-
+#[derive(Default)]
 pub struct AssetsData {
-    view: AssetKind,
-    mode: Mode,
-    mode_dropdown_open: bool,
     assets: HashMap<AssetPath, Asset>,
     index: HashMap<u32, AssetPath>,
-    last_error: Option<anyhow::Error>,
-    query: Option<String>,
-    search_bar: text_input::Id,
     folder: Option<PathBuf>,
-    rename_state: Option<(AssetHandle, String)>,
-    rename_input: text_input::Id,
-    view_dropdown_open: bool,
-    failed_loads: Vec<(AssetHandle, anyhow::Error)>,
-}
-
-impl Default for AssetsData {
-    fn default() -> Self {
-        Self {
-            view: Default::default(),
-            mode: Default::default(),
-            mode_dropdown_open: Default::default(),
-            assets: Default::default(),
-            index: Default::default(),
-            last_error: Default::default(),
-            query: Default::default(),
-            search_bar: text_input::Id::unique(),
-            folder: Default::default(),
-            rename_state: Default::default(),
-            rename_input: text_input::Id::unique(),
-            view_dropdown_open: Default::default(),
-            failed_loads: Vec::new(),
-        }
-    }
+    failed_loads: Vec<(AssetPath, anyhow::Error)>,
 }
 
 impl Index<AssetHandle> for AssetsData {
@@ -281,27 +243,11 @@ impl AssetsData {
         self.folder = Some(folder);
     }
 
-    pub fn query(&self) -> &str {
-        self.query.as_deref().unwrap_or("")
-    }
-
-    pub fn query_present(&self) -> bool {
-        self.query.is_some()
-    }
-
-    pub fn last_error(&self) -> Option<&anyhow::Error> {
-        self.last_error.as_ref()
-    }
-
-    pub fn is_renaming(&self) -> bool {
-        self.rename_state.is_some()
-    }
-
-    pub fn failed_loads(&self) -> &Vec<(AssetHandle, anyhow::Error)> {
+    pub fn failed_loads(&self) -> &Vec<(AssetPath, anyhow::Error)> {
         &self.failed_loads
     }
 
-    fn load(&mut self, path: &Path) -> Result<HashMap<u32, (AssetPath, Result<Asset>)>> {
+    pub fn load(&mut self, path: &Path) -> Result<()> {
         let ctx = |err: &'static str| format!("Failed while loading directory at {path:?}: {err}");
 
         if !path.is_dir() {
@@ -314,10 +260,40 @@ impl AssetsData {
             return Err(anyhow!(std::io::ErrorKind::NotFound));
         }
 
-        load_dir(path).context(format!("Couldn't load {path:?}"))
+        let assets = load_dir(path).context(format!("Couldn't load {path:?}"))?;
+
+        let (succeeded, failed): (HashMap<_, _>, _) =
+            assets.into_iter().partition(|(_, (_, res))| res.is_ok());
+
+        let failed = failed
+            .into_iter()
+            .map(|(_, (asset_path, res))| (asset_path, res.unwrap_err()))
+            .collect::<Vec<_>>();
+
+        if failed.is_empty() {
+            let index: HashMap<u32, AssetPath> = succeeded
+                .iter()
+                .map(|(id, (asset_path, _))| (*id, asset_path.clone()))
+                .collect();
+
+            let assets: HashMap<AssetPath, Asset> = succeeded
+                .into_iter()
+                .map(|(_, (asset_path, asset))| (asset_path, asset.unwrap()))
+                .collect();
+
+            self.index = index;
+
+            self.assets = assets;
+
+            Ok(())
+        } else {
+            self.failed_loads = failed;
+
+            Err(anyhow!(AssetsError::LoadPartiallyFailed))
+        }
     }
 
-    fn rename(&mut self, asset_handle: AssetHandle, mut new_name: String) -> Result<()> {
+    pub fn rename(&mut self, asset_handle: AssetHandle, mut new_name: String) -> Result<()> {
         let old_path = self
             .index
             .get(&asset_handle.0)
@@ -364,32 +340,11 @@ impl AssetsData {
         }
     }
 
-    fn iter(&self) -> impl Iterator<Item = (&u32, &AssetPath, &Asset)> {
+    pub fn iter(&self) -> impl Iterator<Item = (AssetHandle, &AssetPath, &Asset)> {
         self.index.iter().filter_map(|(id, asset_path)| {
             self.assets
                 .get(asset_path)
-                .map(|asset| (id, asset_path, asset))
+                .map(|asset| (AssetHandle(*id), asset_path, asset))
         })
     }
-}
-
-#[derive(Clone, Debug)]
-pub enum AssetsMessage {
-    LoadAssets(PathBuf),
-    LoadCompleted(PathBuf, HashMap<u32, (AssetPath, Asset)>),
-    LoadPartiallyFailed(std::path::PathBuf, HashMap<u32, (AssetPath, Asset)>),
-    LoadFailed,
-    OpenAsset(AssetHandle),
-    EditAsset(AssetHandle),
-    AddAssetToGraph(AssetHandle),
-    SetPayload(Option<crate::Draggable>),
-    QueryChanged(Option<String>),
-    ModeChanged(Mode),
-    ViewChanged(AssetKind),
-    ShowHideModeDropdown,
-    SetRenameInput(Option<(AssetHandle, String)>),
-    RenameAsset,
-    RenameAssetFailed(AssetHandle),
-    ShowHideViewDropdown,
-    LoadAssetFailed(u32, AssetPath),
 }

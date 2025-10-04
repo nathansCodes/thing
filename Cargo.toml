@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+asset_system = { path = "asset_system" }
 anyhow = "1.0.99"
-file_type = "0.8.9"
 iced = { version = "0.13.1", features = [
     "debug",
     "image",
@@ -23,10 +23,9 @@ iced_aw = { version = "0.12.2", features = [
     "tab_bar",
 ] }
 itertools = "0.14.0"
-lazy_static = "1.5.0"
 lyon_algorithms = "1.0.5"
 palette = "0.7.6"
 rfd = "0.15.4"
-ron = "0.10.1"
+ron = "0.11.0"
 serde = { version = "1.0.219", features = ["derive"] }
 thiserror = "2.0.16"

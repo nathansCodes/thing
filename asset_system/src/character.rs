@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::assets::{Asset, AssetHandle};
+use crate::{Asset, AssetHandle};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Character {

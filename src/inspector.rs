@@ -1,3 +1,4 @@
+use asset_system::{Asset, AssetHandle, AssetsData, Character, Image, image::DEFAULT_IMAGE};
 use iced::{
     Alignment::Center,
     Element, Font,
@@ -10,9 +11,7 @@ use iced::{
 };
 
 use crate::{
-    Draggable, State,
-    assets::{Asset, AssetHandle, AssetsData, Character, Image, image::DEFAULT_IMAGE},
-    style,
+    Draggable, State, style,
     widgets::{dnd::dnd_receiver, icon_button, icons, labeled_icon_button},
 };
 

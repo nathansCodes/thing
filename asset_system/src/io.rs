@@ -1,6 +1,6 @@
-use crate::assets::{AsBytes, Asset, AssetKind, AssetPath, AssetsData};
+use crate::{AsBytes, Asset, AssetKind, AssetPath, AssetsData};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use file_type::FileType;
 use iced::advanced::{graphics::image::image_rs::ImageFormat, image};
 use ron::ser::PrettyConfig;
@@ -62,7 +62,7 @@ impl AssetsData {
             return Err(anyhow!(AssetsError::NoFolderLoaded));
         };
 
-        let results = self.iter().filter_map(|(id, asset_path, asset)| {
+        let results = self.iter().filter_map(|(handle, asset_path, asset)| {
             let result: Result<()> = (|| {
                 let bytes = asset.as_bytes()?;
 
@@ -81,8 +81,8 @@ impl AssetsData {
 
             result.err().map(|err| {
                 (
-                    *id,
-                    err.context(format!("Failed to save {asset_path} ({id})")),
+                    handle.0,
+                    err.context(format!("Failed to save {asset_path} ({})", handle.0)),
                 )
             })
         });
@@ -247,25 +247,6 @@ pub fn save(path: &Path, data: String) -> Result<()> {
     Ok(())
 }
 
-pub fn pick_file() -> Result<PathBuf> {
-    let file_handle = rfd::FileDialog::new()
-        .set_title("Select an Image")
-        .add_filter("Image", &["webp", "png", "jpeg", "jpg"])
-        .pick_file()
-        .ok_or(AssetsError::DialogClosed)?;
-
-    Ok(file_handle)
-}
-
-pub fn pick_folder() -> Result<PathBuf> {
-    let file_handle = rfd::FileDialog::new()
-        .set_title("Open a Folder")
-        .pick_folder()
-        .ok_or(AssetsError::DialogClosed)?;
-
-    Ok(file_handle)
-}
-
 fn new_key<V>(map: &HashMap<u32, V>) -> u32 {
     let keys: Vec<&u32> = map.keys().collect();
     (0..).into_iter().find(|id| !keys.contains(&id)).unwrap()
@@ -279,4 +260,6 @@ pub enum AssetsError {
     InvalidAsset,
     #[error("Can't complete operation without any folder being loaded.")]
     NoFolderLoaded,
+    #[error("Loading of assets partially failed.")]
+    LoadPartiallyFailed,
 }

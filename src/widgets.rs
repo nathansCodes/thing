@@ -21,7 +21,6 @@ use iced_aw::DropDown;
 
 use crate::{
     Message, Node,
-    assets::{AssetsData, Character, Image, image::DEFAULT_IMAGE},
     notification::Notification,
     style,
     widgets::{
@@ -29,6 +28,7 @@ use crate::{
         icons::ICON_FONT,
     },
 };
+use asset_system::{AssetsData, Character, Image, image::DEFAULT_IMAGE};
 
 pub fn base_button<'a, Message>(
     content: impl Into<Element<'a, Message>>,

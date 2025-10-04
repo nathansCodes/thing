@@ -1,17 +1,20 @@
-#[allow(unused)]
-mod assets;
+mod assets_pane;
 mod inspector;
 mod notification;
 mod positioning_schemes;
 mod style;
 mod widgets;
 
-use crate::assets::image::DEFAULT_IMAGE;
-use crate::assets::{Asset, AssetHandle, AssetKind, Character, io};
+use crate::assets_pane::{AssetsPane, pick_file, pick_folder};
 use crate::inspector::{Inspector, InspectorMessage};
 use crate::notification::Notification;
 use crate::widgets::dialog::{Dialog, DialogOption};
 use crate::widgets::dnd::{dnd_indicator, dnd_receiver};
+use asset_system::AssetsData;
+use asset_system::image::DEFAULT_IMAGE;
+use asset_system::io::AssetsError;
+use asset_system::{Asset, AssetHandle, AssetKind, Character, io};
+use assets_pane::AssetsMessage;
 use graph::connections::Edge;
 use graph::{GraphEvent, RelativeAttachment, line_styles};
 use iced::Length::Shrink;
@@ -39,11 +42,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 
-use crate::{
-    assets::io::{AssetsError, pick_file, pick_folder},
-    assets::{AssetsData, AssetsMessage},
-    graph::GraphData,
-};
+use crate::graph::GraphData;
 
 fn main() -> iced::Result {
     iced::application("Hello", update, view)
@@ -63,6 +62,7 @@ fn main() -> iced::Result {
                 State {
                     nodes: GraphData::default(),
                     assets: AssetsData::default(),
+                    assets_pane: AssetsPane::default(),
                     panes: pane_grid::State::with_configuration(Configuration::Split {
                         axis: pane_grid::Axis::Vertical,
                         ratio: 0.25,
@@ -101,7 +101,8 @@ enum Node {
 
 struct State {
     nodes: GraphData<Node, RelativeAttachment<line_styles::AxisAligned>>,
-    assets: assets::AssetsData,
+    assets: asset_system::AssetsData,
+    assets_pane: assets_pane::AssetsPane,
     panes: pane_grid::State<Pane>,
     focus: Option<pane_grid::Pane>,
     graph_position: Vector,
@@ -223,9 +224,12 @@ fn view(state: &State) -> Element<'_, Message> {
         .style(style::title_bar_label_container);
 
         let controls_full = container(match pane {
-            Pane::Assets => {
-                Element::from(assets::view_controls(&state.assets).map(Message::AssetsMessage))
-            }
+            Pane::Assets => Element::from(
+                state
+                    .assets_pane
+                    .view_controls()
+                    .map(Message::AssetsMessage),
+            ),
             Pane::Graph => "".into(),
             Pane::Inspector => Element::from(
                 state
@@ -253,9 +257,14 @@ fn view(state: &State) -> Element<'_, Message> {
 
         let content = match pane {
             Pane::Graph => view_graph(state),
-            Pane::Assets => container(state.assets.view().map(Message::AssetsMessage))
-                .padding(2)
-                .into(),
+            Pane::Assets => container(
+                state
+                    .assets_pane
+                    .view(&state.assets)
+                    .map(Message::AssetsMessage),
+            )
+            .padding(2)
+            .into(),
             Pane::Inspector => state.inspector.view(state).map(Message::InspectorMessage),
         };
 
@@ -336,7 +345,7 @@ fn view(state: &State) -> Element<'_, Message> {
                 Asset::Image(img) => img.handle.clone(),
                 Asset::Character(character) => state
                     .assets
-                    .get_direct::<assets::Image>(character.img)
+                    .get_direct::<asset_system::Image>(character.img)
                     .unwrap_or(&DEFAULT_IMAGE)
                     .handle
                     .clone(),
@@ -415,21 +424,20 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             AssetsMessage::LoadAssets(path) => {
                 state.assets.set_folder(path.clone());
                 state
-                    .assets
-                    .update(AssetsMessage::LoadAssets(path.clone()))
+                    .assets_pane
+                    .update(&mut state.assets, AssetsMessage::LoadAssets(path.clone()))
                     .map(Message::AssetsMessage)
             }
-            AssetsMessage::LoadCompleted(path, data) => state
-                .assets
-                .update(AssetsMessage::LoadCompleted(path.clone(), data))
+            AssetsMessage::LoadCompleted(path) => state
+                .assets_pane
+                .update(
+                    &mut state.assets,
+                    AssetsMessage::LoadCompleted(path.clone()),
+                )
                 .map(Message::AssetsMessage)
                 .chain(Task::done(Message::LoadData(path))),
-            AssetsMessage::LoadPartiallyFailed(path, succeeded) => {
-                for (handle, err) in state.assets.failed_loads() {
-                    let Some(path) = state.assets.path(*handle) else {
-                        continue;
-                    };
-
+            AssetsMessage::LoadPartiallyFailed(path) => {
+                for (path, err) in state.assets.failed_loads() {
                     state.notifications.push(Notification::error(
                         "Failed to load asset.",
                         format!("Couldn't load {path}: {err}"),
@@ -437,13 +445,13 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 }
 
                 state
-                    .assets
-                    .update(AssetsMessage::LoadPartiallyFailed(path, succeeded))
+                    .assets_pane
+                    .update(&mut state.assets, AssetsMessage::LoadPartiallyFailed(path))
                     .map(Message::AssetsMessage)
             }
             AssetsMessage::SetPayload(payload) => Task::done(Message::SetDragPayload(payload)),
             AssetsMessage::RenameAssetFailed(_) => {
-                if let Some(err) = state.assets.last_error() {
+                if let Some(err) = state.assets_pane.last_error() {
                     state.notifications.push(Notification::error(
                         "Failed to rename asset",
                         format!("{err:#}"),
@@ -453,7 +461,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 Task::none()
             }
             AssetsMessage::LoadAssetFailed(..) => {
-                if let Some(err) = state.assets.last_error() {
+                if let Some(err) = state.assets_pane.last_error() {
                     state.notifications.push(Notification::error(
                         "Failed to load asset",
                         format!("{err:#}"),
@@ -467,8 +475,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 Task::done(Message::from(InspectorMessage::EnterEditMode)),
             ]),
             _ => state
-                .assets
-                .update(assets_message)
+                .assets_pane
+                .update(&mut state.assets, assets_message)
                 .map(Message::AssetsMessage),
         },
         Message::AddCharacter(chara, pos) => {
@@ -885,9 +893,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::EscapePressed => {
             if state.dialog.is_some() {
                 Task::done(Message::CloseDialog)
-            } else if state.assets.is_renaming() {
+            } else if state.assets_pane.is_renaming() {
                 Task::done(Message::AssetsMessage(AssetsMessage::SetRenameInput(None)))
-            } else if state.assets.query_present() {
+            } else if state.assets_pane.query_present() {
                 Task::done(Message::AssetsMessage(AssetsMessage::QueryChanged(None)))
             } else {
                 Task::none()
@@ -1011,7 +1019,7 @@ fn view_graph(state: &State) -> Element<'_, Message> {
         |payload, relative_cursor_pos| match payload {
             Draggable::Asset(handle) => state
                 .assets
-                .is::<assets::Character>(handle)
+                .is::<asset_system::Character>(handle)
                 .then_some(Message::DropAssetOnGraph(handle, relative_cursor_pos)),
         },
         state.dnd_payload.clone(),

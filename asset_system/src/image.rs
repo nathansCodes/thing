@@ -6,9 +6,9 @@ use iced::{
     widget::image as iced_image,
 };
 
-use crate::assets::{AsBytes, Asset};
+use crate::{AsBytes, Asset};
 
-const DEFAULT_IMAGE_BYTES: &[u8] = include_bytes!("../../assets/default.png").as_slice();
+const DEFAULT_IMAGE_BYTES: &[u8] = include_bytes!("../assets/default.png").as_slice();
 
 lazy_static! {
     pub static ref DEFAULT_IMAGE: Image = {

@@ -1,0 +1,13 @@
+[package]
+name = "asset_system"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+iced = { version = "0.13.1", features = ["advanced", "image"] }
+anyhow = "1.0.99"
+file_type = "0.8.9"
+ron = "0.11.0"
+serde = { version = "1.0.219", features = ["derive"] }
+thiserror = "2.0.16"
+lazy_static = "1.5.0"
